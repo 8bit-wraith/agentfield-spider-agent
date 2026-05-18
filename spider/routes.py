@@ -39,6 +39,7 @@ from .state import (
 
 
 _CONTENT_JSON = "application/json"
+_OCTET_STREAM = "application/octet-stream"
 
 
 def _json(obj: Any, status: int = 200) -> web.Response:
@@ -631,6 +632,208 @@ def _primary_backend_for(deps: FetchDeps) -> str:
     return "cloak"
 
 
+# ─── /profiles ──────────────────────────────────────────────────────
+async def profiles_list(request: web.Request) -> web.Response:
+    """``GET /profiles`` — list browser profiles, newest-touched first.
+
+    Query: ?limit=N (default 100, clamped to [1, 500]).
+    """
+    store = request.app.get("profiles")
+    if store is None or not store.enabled:
+        return _json({"sessions": [], "error": "profiles disabled (no postgres)"},
+                     status=503)
+    limit = int(request.query.get("limit", "100") or "100")
+    infos = await store.list(limit=limit)
+    return _json({"profiles": [i.model_dump() for i in infos]})
+
+
+async def profiles_get(request: web.Request) -> web.Response:
+    """``GET /profiles/{name}`` — single profile metadata (NOT the zip)."""
+    store = request.app.get("profiles")
+    if store is None or not store.enabled:
+        return _json({"error": "profiles disabled (no postgres)"}, status=503)
+    name = request.match_info["name"]
+    info = await store.get(name)
+    if info is None:
+        return _json({"error": "profile not found", "name": name}, status=404)
+    return _json(info.model_dump())
+
+
+async def profiles_fetch_zip(request: web.Request) -> web.Response:
+    """``GET /profiles/{name}/zip`` — fetch the user_data zip binary.
+
+    Returns ``application/octet-stream`` with the zip body, or 404 if
+    no profile / no zip. Content-Disposition gives a sensible filename.
+    """
+    store = request.app.get("profiles")
+    if store is None or not store.enabled:
+        return _json({"error": "profiles disabled (no postgres)"}, status=503)
+    name = request.match_info["name"]
+    blob = await store.fetch_zip(name)
+    if blob is None:
+        return _json(
+            {"error": "profile or zip not found", "name": name},
+            status=404,
+        )
+    return web.Response(
+        body=blob,
+        content_type=_OCTET_STREAM,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{name}.zip"'
+            ),
+        },
+    )
+
+
+async def profiles_add(request: web.Request) -> web.Response:
+    """``POST /profiles`` — create or replace a profile.
+
+    Two body modes:
+
+    Mode 1 — JSON body (no zip)::
+        {
+          "name": "alice",
+          "backend": "cloak",
+          "storage_state": {...},     // optional Playwright storage_state.json
+          "metadata": {...}
+        }
+
+    Mode 2 — multipart upload of a zip::
+        Content-Type: multipart/form-data
+        Fields:
+          name           form field
+          backend        form field (optional, default "cloak")
+          metadata       form field (optional, JSON string)
+          profile        file part (the zip body)
+
+    Returns the resulting profile info on 200; 400 on validation
+    failures; 503 if postgres is unavailable.
+    """
+    store = request.app.get("profiles")
+    if store is None or not store.enabled:
+        return _json({"error": "profiles disabled (no postgres)"}, status=503)
+
+    ct = request.headers.get("Content-Type", "")
+    name: str | None = None
+    backend = "cloak"
+    storage_state: dict | None = None
+    user_data_zip: bytes | None = None
+    metadata: dict[str, Any] = {}
+
+    if ct.startswith("multipart/"):
+        # Mode 2: multipart with file upload.
+        reader = await request.multipart()
+        async for part in reader:
+            if part.name == "name":
+                name = (await part.text()).strip()
+            elif part.name == "backend":
+                backend = (await part.text()).strip() or "cloak"
+            elif part.name == "metadata":
+                try:
+                    metadata = orjson.loads(await part.read())
+                except (orjson.JSONDecodeError, ValueError):
+                    return _json({"error": "metadata: invalid json"}, status=400)
+            elif part.name == "profile":
+                user_data_zip = await part.read(decode=False)
+            else:
+                # Discard unknown parts.
+                await part.read(decode=False)
+    else:
+        # Mode 1: JSON body.
+        payload, err = await _read_json(request)
+        if err:
+            return _json({"error": err}, status=400)
+        body = payload or {}
+        name = (body.get("name") or "").strip() or None
+        backend = (body.get("backend") or "cloak").strip()
+        ss = body.get("storage_state")
+        if ss is not None:
+            if not isinstance(ss, dict):
+                return _json(
+                    {"error": "storage_state must be an object"}, status=400,
+                )
+            storage_state = ss
+        md = body.get("metadata") or {}
+        if not isinstance(md, dict):
+            return _json({"error": "metadata must be an object"}, status=400)
+        metadata = md
+
+    if not name:
+        return _json({"error": "name required"}, status=400)
+    if backend not in ("cloak", "lightpanda", "browser-use"):
+        backend = "cloak"
+
+    try:
+        info = await store.upsert(
+            name=name,
+            backend=backend,
+            storage_state=storage_state,
+            user_data_zip=user_data_zip,
+            metadata=metadata,
+        )
+    except ValueError as e:
+        return _json({"error": str(e)}, status=400)
+    except Exception as e:  # noqa: BLE001
+        return _json(
+            {"error": f"{type(e).__name__}: {e}"}, status=502,
+        )
+    return _json(info.model_dump(), status=200)
+
+
+async def profiles_delete(request: web.Request) -> web.Response:
+    """``DELETE /profiles/{name}`` — drop a profile + its blob."""
+    store = request.app.get("profiles")
+    if store is None or not store.enabled:
+        return _json({"error": "profiles disabled (no postgres)"}, status=503)
+    name = request.match_info["name"]
+    deleted = await store.delete(name)
+    if not deleted:
+        return _json({"error": "profile not found"}, status=404)
+    return _json({"ok": True, "name": name})
+
+
+# ─── /chrome-conn + /vnc-conn (browser-use compat) ──────────────────
+async def chrome_conn(request: web.Request) -> web.Response:
+    """``GET /chrome-conn`` — return the CDP endpoint clients can drive.
+
+    Backed by browser-use's CDP sidecar by default
+    (``BROWSER_USE_CDP_URL``). Probes the URL for liveness; reports
+    ``status="up"`` or ``status="down"`` so callers don't waste a CDP
+    handshake against a dead endpoint.
+    """
+    from .browsers import browser_use_engine
+
+    url = browser_use_engine.get_chrome_cdp_url()
+    alive, detail = await browser_use_engine.probe_chrome_alive()
+    return _json({
+        "status": "up" if alive else "down",
+        "cdp_url": url,
+        "detail": detail,
+    })
+
+
+async def vnc_conn(request: web.Request) -> web.Response:
+    """``GET /vnc-conn`` — return the VNC URL for visual debugging of
+    the browser-use sidecar (when configured with VNC).
+
+    No probe — VNC doesn't have a fast HTTP introspection endpoint.
+    Operator confirms by opening the URL in a VNC viewer.
+    """
+    from .browsers import browser_use_engine
+
+    return _json({
+        "vnc_url": browser_use_engine.get_vnc_url(),
+        # Sidecar's web UI (web-ui project ships one on :8080).
+        "web_ui_url": browser_use_engine.BROWSER_USE_HTTP_URL,
+        "notes": (
+            "Open this URL in a VNC viewer. The browser-use sidecar's "
+            "web UI surfaces the live browser at "
+            f"{browser_use_engine.BROWSER_USE_HTTP_URL}."
+        ),
+    })
+
+
 # ─── registration ───────────────────────────────────────────────────
 def register_routes(app: web.Application) -> None:
     """Wire all v1 routes into ``app``. Idempotent across distinct apps."""
@@ -649,6 +852,15 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post("/sitemap/parse", sitemap_handler)
     app.router.add_post("/screenshot", screenshot)
     app.router.add_post("/extract", extract)
+    # Profiles
+    app.router.add_get("/profiles", profiles_list)
+    app.router.add_post("/profiles", profiles_add)
+    app.router.add_get("/profiles/{name}", profiles_get)
+    app.router.add_get("/profiles/{name}/zip", profiles_fetch_zip)
+    app.router.add_delete("/profiles/{name}", profiles_delete)
+    # Browser-use sidecar conn URLs
+    app.router.add_get("/chrome-conn", chrome_conn)
+    app.router.add_get("/vnc-conn", vnc_conn)
     # Sessions
     app.router.add_post("/sessions", sessions_create)
     app.router.add_get("/sessions", sessions_list)

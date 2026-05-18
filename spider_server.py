@@ -35,11 +35,13 @@ import aiohttp
 import redis.asyncio as redis_asyncio
 from aiohttp import web
 
+from spider import storage as pg_storage
 from spider.browser import BROWSER_MAX_PAGES, CloakBrowserPool
 from spider.browsers import env_backend, make_pool, register_primary, shutdown_all
 from spider.feeds import poller
 from spider.fetch import FetchDeps
 from spider.politeness import HostBucket, RobotsCache
+from spider.profiles import ProfileStore
 from spider.queue import dispatcher
 from spider.routes import register_routes
 from spider.sessions import SessionManager
@@ -79,6 +81,17 @@ async def _on_startup(app: web.Application) -> None:
     app["sessions"] = sessions
     app["deps"] = deps
     logger.info("spider-http browser backend=%s", backend)
+
+    # Optional postgres backend for profiles + (future) cross-restart
+    # session recovery. When POSTGRES_URL isn't set, ProfileStore
+    # becomes a no-op and the /profiles routes return 503.
+    pg_pool = await pg_storage.connect()
+    app["pg_pool"] = pg_pool
+    app["profiles"] = ProfileStore(pg_pool)
+    if pg_pool is not None:
+        logger.info("spider-http profile store ready (postgres)")
+    else:
+        logger.info("spider-http profiles disabled (no POSTGRES_URL)")
 
     redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
     r = redis_asyncio.from_url(redis_url, decode_responses=False)
@@ -165,6 +178,13 @@ async def _on_cleanup(app: web.Application) -> None:
     http: aiohttp.ClientSession | None = app.get("http")
     if http is not None:
         await _cleanup_step("http.close", http.close(), timeout=5.0)
+
+    # 5. Postgres pool
+    pg_pool = app.get("pg_pool")
+    if pg_pool is not None:
+        await _cleanup_step(
+            "pg_pool.close", pg_storage.close(pg_pool), timeout=5.0,
+        )
 
     total_ms = (time.perf_counter() - cleanup_started) * 1000
     logger.info("spider-http cleanup done total_ms=%.0f", total_ms)

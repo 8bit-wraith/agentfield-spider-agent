@@ -7,6 +7,10 @@ feedparser>=6
 orjson
 beautifulsoup4>=4.12
 cloakbrowser
+# Postgres-backed profiles + (future) session persistence. When the
+# POSTGRES_URL env isn't set, the agent runs without it — features
+# that need persistence return 503.
+asyncpg>=0.29
 # Optional extras (see pyproject.toml [project.optional-dependencies]):
 #   playwright is needed for the Lightpanda beta backend.
 #   docling is heavy (~1.5 GB ML models on first use) — installed in the

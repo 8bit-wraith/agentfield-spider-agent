@@ -188,6 +188,11 @@ The scripts install `requirements.txt`, validate with `pip check`, and
 optionally install Docling when `SPIDER_INSTALL_DOCLING=1` (legacy
 `SPIDER_DOCLING_ENABLED=1` is still accepted).
 
+By default the same setup path also installs Docker CLI + buildx
+(`SPIDER_INSTALL_DOCKER=1`) and performs `docker login` when both
+`DOCKER_USER` and `DOCKER_PAT` are present (registry defaults to
+`DOCKER_REGISTRY=docker.io`).
+
 For local containerized development, `.devcontainer/devcontainer.json`
 uses `.devcontainer/postCreate.sh`, which delegates to the same shared
 bootstrap script.

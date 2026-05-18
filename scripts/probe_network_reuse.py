@@ -183,7 +183,9 @@ async def _probe_backend(backend: str, targets: tuple[str, ...]) -> list[ProbeOu
     out: list[ProbeOutcome] = []
     try:
         try:
-            info = await session_mgr.create(pool=pool, backend_label=backend, name="network-reuse-smoke")
+            info = await session_mgr.create(
+                pool=pool, backend_label=backend, name="network-reuse-smoke"
+            )
         except Exception as e:
             out.append(
                 ProbeOutcome(

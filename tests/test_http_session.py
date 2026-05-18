@@ -19,6 +19,7 @@ def test_http_session_uses_explicit_tcp_connector(monkeypatch) -> None:
     import spider_server
 
     spider_server = importlib.reload(spider_server)
+
     async def _go() -> None:
         sess = spider_server._build_http_session()
         try:
@@ -44,6 +45,7 @@ def test_http_session_invalid_env_values_fall_back(monkeypatch) -> None:
     import spider_server
 
     spider_server = importlib.reload(spider_server)
+
     async def _go() -> None:
         sess = spider_server._build_http_session()
         try:

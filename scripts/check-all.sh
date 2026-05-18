@@ -17,6 +17,7 @@
 #   SKIP_SITEMAP=1 ./check-all.sh
 #   SKIP_SINK=1 ./check-all.sh     # skip chromadb (auto-skips if SPIDER_SINK_ENABLED unset)
 #   SKIP_MULTI=1 ./check-all.sh    # sitemap runs only the reference target
+#   SKIP_REUSE=1 ./check-all.sh    # skip HTTP/TLS connection-reuse probe
 
 set -euo pipefail
 
@@ -51,6 +52,14 @@ if [[ "${SKIP_SINK:-0}" == "1" ]]; then
     echo "SKIP: SKIP_SINK=1"
 else
     "$SCRIPT_DIR/check-chroma-sink.sh"
+fi
+echo
+
+if [[ "${SKIP_REUSE:-0}" == "1" ]]; then
+    echo "═══ G. network reuse ═══"
+    echo "SKIP: SKIP_REUSE=1"
+else
+    "$SCRIPT_DIR/check-network-reuse.sh"
 fi
 
 echo

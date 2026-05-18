@@ -13,8 +13,8 @@ cloakbrowser
 asyncpg>=0.29
 # Optional extras (see pyproject.toml [project.optional-dependencies]):
 #   playwright is needed for the Lightpanda beta backend.
-#   docling is heavy (~1.5 GB ML models on first use) — installed in the
-#   container only if SPIDER_DOCLING_ENABLED=1 to keep the image lean.
+#   docling is heavy (~1.5 GB ML models on first use) — setup scripts
+#   install it when SPIDER_INSTALL_DOCLING=1 (legacy: SPIDER_DOCLING_ENABLED=1).
 playwright>=1.40
 pytest>=8
 pytest-asyncio>=0.23

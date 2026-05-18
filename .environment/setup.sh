@@ -16,8 +16,16 @@ echo "[env] upgrading pip/setuptools/wheel"
 echo "[env] installing project dependencies from requirements.txt"
 "${PIP_CMD[@]}" install -r requirements.txt
 
-if [[ "${SPIDER_INSTALL_DOCLING:-0}" == "1" ]]; then
-    echo "[env] SPIDER_INSTALL_DOCLING=1 -> installing docling extra"
+install_docling=0
+if [[ "${SPIDER_INSTALL_DOCLING:-0}" == "1" || "${SPIDER_DOCLING_ENABLED:-0}" == "1" ]]; then
+    install_docling=1
+fi
+
+if [[ "$install_docling" == "1" ]]; then
+    if [[ "${SPIDER_DOCLING_ENABLED:-0}" == "1" && "${SPIDER_INSTALL_DOCLING:-0}" != "1" ]]; then
+        echo "[env] SPIDER_DOCLING_ENABLED is deprecated; prefer SPIDER_INSTALL_DOCLING=1"
+    fi
+    echo "[env] docling requested -> installing docling extra"
     "${PIP_CMD[@]}" install "docling>=2.0"
 fi
 

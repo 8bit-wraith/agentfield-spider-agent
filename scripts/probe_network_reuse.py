@@ -11,23 +11,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import aiohttp
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
 import spider_server
 from spider.browsers import make_pool, normalize_backend
 from spider.sessions import SessionManager
-
 
 DEFAULT_TARGETS = (
     "https://www.howsmyssl.com/a/check",
@@ -133,14 +127,19 @@ async def _probe_backend_target(
                     cdp = await page.context.new_cdp_session(page)
                     await cdp.send("Network.enable")
 
-                    def _on_response(params: dict[str, Any]) -> None:
+                    def _on_response(
+                        params: dict[str, Any],
+                        *,
+                        events_ref: list[dict[str, Any]] = events,
+                        target_url: str = target,
+                    ) -> None:
                         if params.get("type") != "Document":
                             return
                         response = params.get("response") or {}
                         response_url = str(response.get("url") or "")
-                        if not _same_doc_target(response_url, target):
+                        if not _same_doc_target(response_url, target_url):
                             return
-                        events.append(
+                        events_ref.append(
                             {
                                 "url": response_url,
                                 "connection_id": response.get("connectionId"),
@@ -158,10 +157,8 @@ async def _probe_backend_target(
                 if events:
                     sample.update(events[-1])
                 if cdp is not None:
-                    try:
+                    with contextlib.suppress(Exception):
                         await cdp.detach()
-                    except Exception:
-                        pass
             samples.append(sample)
     except Exception as e:
         return ProbeOutcome(

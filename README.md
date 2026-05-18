@@ -168,7 +168,8 @@ Environment bootstrap is centralized in:
 - `.environment/claude/setup.sh`
 
 The scripts install `requirements.txt`, validate with `pip check`, and
-optionally install Docling when `SPIDER_INSTALL_DOCLING=1`.
+optionally install Docling when `SPIDER_INSTALL_DOCLING=1` (legacy
+`SPIDER_DOCLING_ENABLED=1` is still accepted).
 
 For local containerized development, `.devcontainer/devcontainer.json`
 uses `.devcontainer/postCreate.sh`, which delegates to the same shared

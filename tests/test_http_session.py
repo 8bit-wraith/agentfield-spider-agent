@@ -34,6 +34,30 @@ def test_http_session_uses_explicit_tcp_connector(monkeypatch) -> None:
     asyncio.run(_go())
 
 
+def test_http_session_invalid_env_values_fall_back(monkeypatch) -> None:
+    monkeypatch.setenv("SPIDER_HTTP_KEEPALIVE_TIMEOUT_S", "bad")
+    monkeypatch.setenv("SPIDER_HTTP_CONN_LIMIT", "zero")
+    monkeypatch.setenv("SPIDER_HTTP_CONN_LIMIT_PER_HOST", "-10")
+    monkeypatch.setenv("SPIDER_HTTP_DNS_CACHE_TTL_S", "oops")
+    monkeypatch.setenv("SPIDER_HTTP_ENABLE_CLEANUP_CLOSED", "maybe")
+
+    import spider_server
+
+    spider_server = importlib.reload(spider_server)
+    async def _go() -> None:
+        sess = spider_server._build_http_session()
+        try:
+            conn = sess.connector
+            assert isinstance(conn, aiohttp.TCPConnector)
+            assert conn.limit == 200
+            assert conn.limit_per_host == 50
+            assert conn._keepalive_timeout == 45.0  # noqa: SLF001
+        finally:
+            await sess.close()
+
+    asyncio.run(_go())
+
+
 def test_http_session_reuses_connections() -> None:
     async def _go() -> tuple[int, int]:
         app = web.Application()

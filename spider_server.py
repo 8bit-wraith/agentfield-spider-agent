@@ -55,11 +55,55 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 
-HTTP_KEEPALIVE_TIMEOUT_S = float(os.getenv("SPIDER_HTTP_KEEPALIVE_TIMEOUT_S", "45"))
-HTTP_CONN_LIMIT = int(os.getenv("SPIDER_HTTP_CONN_LIMIT", "200"))
-HTTP_CONN_LIMIT_PER_HOST = int(os.getenv("SPIDER_HTTP_CONN_LIMIT_PER_HOST", "50"))
-HTTP_DNS_CACHE_TTL_S = int(os.getenv("SPIDER_HTTP_DNS_CACHE_TTL_S", "300"))
-HTTP_ENABLE_CLEANUP_CLOSED = os.getenv("SPIDER_HTTP_ENABLE_CLEANUP_CLOSED", "1") == "1"
+
+def _env_float(name: str, default: float, *, min_value: float | None = None) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        logger.warning("%s=%r is invalid; using default=%s", name, raw, default)
+        return default
+    if min_value is not None and value < min_value:
+        logger.warning("%s=%s is below min=%s; using default=%s", name, value, min_value, default)
+        return default
+    return value
+
+
+def _env_int(name: str, default: int, *, min_value: int | None = None) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        logger.warning("%s=%r is invalid; using default=%s", name, raw, default)
+        return default
+    if min_value is not None and value < min_value:
+        logger.warning("%s=%s is below min=%s; using default=%s", name, value, min_value, default)
+        return default
+    return value
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    logger.warning("%s=%r is invalid boolean; using default=%s", name, raw, int(default))
+    return default
+
+
+HTTP_KEEPALIVE_TIMEOUT_S = _env_float("SPIDER_HTTP_KEEPALIVE_TIMEOUT_S", 45.0, min_value=0.1)
+HTTP_CONN_LIMIT = _env_int("SPIDER_HTTP_CONN_LIMIT", 200, min_value=1)
+HTTP_CONN_LIMIT_PER_HOST = _env_int("SPIDER_HTTP_CONN_LIMIT_PER_HOST", 50, min_value=1)
+HTTP_DNS_CACHE_TTL_S = _env_int("SPIDER_HTTP_DNS_CACHE_TTL_S", 300, min_value=0)
+HTTP_ENABLE_CLEANUP_CLOSED = _env_bool("SPIDER_HTTP_ENABLE_CLEANUP_CLOSED", True)
 
 
 def _build_http_session(

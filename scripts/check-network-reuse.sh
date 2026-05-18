@@ -14,6 +14,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+ROOT_DIR="$( cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd )"
 
 TARGETS="${SMOKE_REUSE_TARGETS:-https://www.howsmyssl.com/a/check,https://httpbin.org/headers}"
 BACKENDS="${SMOKE_REUSE_BACKENDS:-cloak,lightpanda}"
@@ -43,4 +44,5 @@ for t in "${enforce_arr[@]}"; do
     [[ -n "$t" ]] && args+=(--enforce-target "$t")
 done
 
+PYTHONPATH="$ROOT_DIR${PYTHONPATH:+:$PYTHONPATH}" \
 python3 "$SCRIPT_DIR/probe_network_reuse.py" "${args[@]}"

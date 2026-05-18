@@ -158,6 +158,22 @@ curl -X POST http://localhost:11700/fetch/sync \
   -d '{"url":"https://example.com"}'
 ```
 
+## Agent/dev bootstrap scripts
+
+Environment bootstrap is centralized in:
+
+- `.environment/setup.sh` (shared)
+- `.environment/cursor/setup.sh`
+- `.environment/codex/setup.sh`
+- `.environment/claude/setup.sh`
+
+The scripts install `requirements.txt`, validate with `pip check`, and
+optionally install Docling when `SPIDER_INSTALL_DOCLING=1`.
+
+For local containerized development, `.devcontainer/devcontainer.json`
+uses `.devcontainer/postCreate.sh`, which delegates to the same shared
+bootstrap script.
+
 ## Engines / dependencies
 
 | Concern | Library | Notes |

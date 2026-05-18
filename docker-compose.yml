@@ -4,7 +4,16 @@
 
 services:
   spider-agent:
-    build: .
+    build:
+      context: .
+      # DHI base images by default. Override via env to use upstream
+      # Python (e.g. for local dev without DHI subscription):
+      #   BASE_BUILDER=python:3.12-slim BASE_RUNTIME=python:3.12-slim \
+      #     docker compose build spider-agent
+      args:
+        BASE_BUILDER: ${BASE_BUILDER:-dhi.io/python:3.12-dev}
+        BASE_RUNTIME: ${BASE_RUNTIME:-dhi.io/python:3.12-dev}
+        INSTALL_DOCLING: ${INSTALL_DOCLING:-0}
     env_file: .env
     environment:
       AGENT_CALLBACK_URL: http://spider-agent:8005
@@ -21,7 +30,12 @@ services:
     stop_grace_period: 30s
 
   spider-http:
-    build: .
+    build:
+      context: .
+      args:
+        BASE_BUILDER: ${BASE_BUILDER:-dhi.io/python:3.12-dev}
+        BASE_RUNTIME: ${BASE_RUNTIME:-dhi.io/python:3.12-dev}
+        INSTALL_DOCLING: ${INSTALL_DOCLING:-0}
     env_file: .env
     environment:
       REDIS_URL: redis://redis:6379/0

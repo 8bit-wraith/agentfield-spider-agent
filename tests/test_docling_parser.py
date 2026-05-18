@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 import types
 from typing import Any
 
@@ -235,3 +236,42 @@ def test_fetch_via_docling_proxy_kwarg_logged_but_ignored(monkeypatch, caplog) -
     assert out["status"] == "ok"
     # We don't assert on the log line — the log helper writes to a
     # named logger, capturing it would couple this test to log setup.
+
+
+def test_fetch_via_docling_respects_table_and_text_limits(monkeypatch) -> None:
+    _install_fake_docling(
+        monkeypatch,
+        markdown=("# Title\n\n" + ("body " * 300)),
+        tables=["t1", "t2", "t3", "t4"],
+        n_pages=2,
+    )
+    monkeypatch.setenv("SPIDER_DOCLING_MAX_TABLES", "2")
+    monkeypatch.setenv("SPIDER_DOCLING_TABLES_PREVIEW", "1")
+    monkeypatch.setenv("SPIDER_DOCLING_MAX_TEXT_CHARS", "1000")
+
+    out = _run(fetch_via_docling("https://example.com/paper.pdf"))
+    assert out["status"] == "ok"
+    assert out["metadata"]["n_tables"] == 2
+    assert len(out["metadata"]["tables_preview"]) == 1
+    assert out["metadata"]["truncated"] is True
+    assert out["metadata"]["max_text_chars"] == 1000
+    assert "[truncated" in out["text"]
+
+
+def test_fetch_via_docling_timeout(monkeypatch) -> None:
+    class _SlowConverter:
+        def convert(self, url: str) -> Any:  # noqa: ARG002
+            time.sleep(1.2)
+            raise RuntimeError("should timeout first")
+
+    fake_dc_mod = types.ModuleType("docling.document_converter")
+    fake_dc_mod.DocumentConverter = _SlowConverter  # type: ignore[attr-defined]
+    fake_docling_pkg = types.ModuleType("docling")
+    fake_docling_pkg.document_converter = fake_dc_mod  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "docling", fake_docling_pkg)
+    monkeypatch.setitem(sys.modules, "docling.document_converter", fake_dc_mod)
+    monkeypatch.setenv("SPIDER_DOCLING_TIMEOUT_S", "1")
+
+    out = _run(fetch_via_docling("https://example.com/slow.pdf"))
+    assert out["status"] == "error"
+    assert "timed out" in out["error"]

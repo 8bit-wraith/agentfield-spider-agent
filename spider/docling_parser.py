@@ -24,6 +24,7 @@ structure, so the spider routes them away from the browser pool.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import time
 import uuid
@@ -63,6 +64,35 @@ DOC_CONTENT_TYPE_PREFIXES: tuple[str, ...] = (
     "application/vnd.ms-",
     "application/vnd.oasis.opendocument.",
 )
+
+# Runtime tuning knobs. Defaults are conservative for CPU-heavy
+# document conversion while keeping useful table coverage.
+DOCLING_PARSE_TIMEOUT_S: float = 120.0
+DOCLING_MAX_TABLES: int = 10
+DOCLING_TABLES_PREVIEW: int = 3
+DOCLING_MAX_TEXT_CHARS: int = 500_000
+
+
+def _env_int(name: str, default: int, *, min_value: int = 0) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return default
+    return value if value >= min_value else default
+
+
+def _env_float(name: str, default: float, *, min_value: float = 0.0) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        return default
+    return value if value >= min_value else default
 
 
 def is_docling_url(url: str) -> bool:
@@ -140,6 +170,22 @@ async def fetch_via_docling(
     t0 = time.perf_counter()
     ts = int(time.time() * 1000)
     job_id = _new_job_id()
+    parse_timeout_s = _env_float(
+        "SPIDER_DOCLING_TIMEOUT_S",
+        DOCLING_PARSE_TIMEOUT_S,
+        min_value=1.0,
+    )
+    max_tables = _env_int("SPIDER_DOCLING_MAX_TABLES", DOCLING_MAX_TABLES, min_value=0)
+    tables_preview = _env_int(
+        "SPIDER_DOCLING_TABLES_PREVIEW",
+        DOCLING_TABLES_PREVIEW,
+        min_value=0,
+    )
+    max_text_chars = _env_int(
+        "SPIDER_DOCLING_MAX_TEXT_CHARS",
+        DOCLING_MAX_TEXT_CHARS,
+        min_value=1_000,
+    )
 
     if proxy:
         log(
@@ -176,7 +222,7 @@ async def fetch_via_docling(
         tables_attr = getattr(doc, "tables", None) or []
         # Cap to keep response sane; users wanting full tables can
         # call docling directly.
-        for t in tables_attr[:10]:
+        for t in tables_attr[:max_tables]:
             try:
                 tables_md.append(t.export_to_markdown())
             except Exception:  # pragma: no cover - per-table failure
@@ -189,7 +235,18 @@ async def fetch_via_docling(
         }
 
     try:
-        parsed = await loop.run_in_executor(None, _parse)
+        parsed = await asyncio.wait_for(
+            loop.run_in_executor(None, _parse),
+            timeout=parse_timeout_s,
+        )
+    except TimeoutError:
+        return _error_envelope(
+            url,
+            error=f"docling parse timed out after {int(parse_timeout_s)}s",
+            t0=t0,
+            ts=ts,
+            job_id=job_id,
+        )
     except Exception as e:
         return _error_envelope(
             url,
@@ -200,6 +257,9 @@ async def fetch_via_docling(
         )
 
     md: str = parsed["markdown"]
+    if len(md) > max_text_chars:
+        truncated_by = len(md) - max_text_chars
+        md = md[:max_text_chars] + f"\n\n[truncated {truncated_by} chars]"
     title = _first_heading(md) or url
     description = "Document parsed by Docling"
     if parsed.get("n_pages"):
@@ -220,7 +280,9 @@ async def fetch_via_docling(
         "metadata": {
             "n_pages": parsed.get("n_pages"),
             "n_tables": len(parsed["tables"]),
-            "tables_preview": parsed["tables"][:3],
+            "tables_preview": parsed["tables"][:tables_preview],
+            "truncated": len(parsed["markdown"]) > len(md),
+            "max_text_chars": max_text_chars,
         },
     }
 
@@ -228,6 +290,10 @@ async def fetch_via_docling(
 __all__ = [
     "DOC_CONTENT_TYPE_PREFIXES",
     "DOC_EXTS",
+    "DOCLING_MAX_TABLES",
+    "DOCLING_MAX_TEXT_CHARS",
+    "DOCLING_PARSE_TIMEOUT_S",
+    "DOCLING_TABLES_PREVIEW",
     "DoclingDependencyError",
     "DoclingResult",
     "fetch_via_docling",

@@ -128,6 +128,23 @@ pip install -e ".[docling]"
 When docling isn't installed, the parser returns a clean
 `status="error"` envelope rather than crashing.
 
+Docling runtime tuning knobs:
+
+- `SPIDER_DOCLING_TIMEOUT_S` (default `120`) — parse timeout
+- `SPIDER_DOCLING_MAX_TABLES` (default `10`) — max tables extracted
+- `SPIDER_DOCLING_TABLES_PREVIEW` (default `3`) — preview tables in metadata
+- `SPIDER_DOCLING_MAX_TEXT_CHARS` (default `500000`) — response text cap
+
+On `main` pushes, CI also builds and pushes a Docling-enabled image
+(`INSTALL_DOCLING=1`) using the configured cloud Buildx builder and
+tags it as `docling-latest` + `docling-$SHA`.
+
+Manual push helper:
+
+```bash
+DOCKER_USER=your-user scripts/build-docling-image.sh
+```
+
 ## Outbound proxy
 
 When `SPIDER_PROXY_URL` is set in the environment, ALL outbound HTTP

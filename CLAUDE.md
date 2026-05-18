@@ -181,6 +181,66 @@ in. If docling isn't installed when the parser is invoked, the
 function returns a `status="error"` envelope rather than raising —
 keeps the dispatcher contract clean.
 
+## Sessions / contexts (PR-OPT-CTX)
+
+`spider/sessions.py` exposes `SessionManager` — an in-memory registry
+of named browser sessions (= `BrowserContext`'s on the active pool's
+`Browser`). Each session is isolated: cookies, localStorage, cache,
+and persistent JS state are scoped to the context.
+
+HTTP API:
+
+  POST   /sessions                   create -> {id, name, backend, ...info}
+  GET    /sessions                   list   newest-touched first
+  GET    /sessions/{id}              get    404 if unknown / expired
+  DELETE /sessions/{id}              close  free the context
+
+  POST /fetch/sync {url, session_id}  reuses that session's context
+
+Eviction:
+  - Hard cap: `SPIDER_MAX_SESSIONS` (default 100). LRU on overflow.
+  - TTL: `SPIDER_SESSION_TTL_S` (default 7200 / 2 h). Expired sessions
+    raise `KeyError` on next access; the routes layer surfaces this
+    as 404.
+
+Sessions belong to one pool — leasing a session through a different
+backend's pool raises `RuntimeError`. Switch backends ⇒ new session.
+
+Persistence (storage_state to disk) is v2.
+
+## Build optimization (PR-OPT-CTX)
+
+`Dockerfile.lightpanda` and `Dockerfile.cloak` are multi-stage with:
+  - jemalloc LD_PRELOAD in the runtime layer (~15-30% memory wins
+    on browser workloads with their small-alloc churn)
+  - slim final layer (debian:trixie-slim + only runtime libs)
+  - tini as PID-1 for clean SIGTERM forwarding
+  - HEALTHCHECK wired (CDP `/json/version` for lightpanda)
+
+Lightpanda supports two BUILD_MODE values:
+  - `binary` (default) — fetches upstream release from GH
+  - `source` — clones the lightpanda repo, builds with Zig +
+    wild linker + clang/lld + jemalloc
+
+Smart-build flow (`scripts/build_browser.sh`):
+  1. Probe upstream version (GH release for lightpanda, PyPI for
+     cloakbrowser).
+  2. Probe `{REGISTRY}/{engine}-opt-ag:latest` for its
+     `org.opencontainers.image.version` label.
+  3. Match → exit 0 (no rebuild).
+  4. Mismatch (or --force) → build, label, push, update `:latest`.
+
+Usage:
+
+```
+REGISTRY=ghcr.io/peterlodri-sec scripts/build_browser.sh lightpanda
+REGISTRY=ghcr.io/peterlodri-sec scripts/build_browser.sh lightpanda --mode=source
+REGISTRY=ghcr.io/peterlodri-sec scripts/build_browser.sh cloak --force
+```
+
+The script outputs `image_ref=...` so CI / deploy scripts can pipe
+the chosen tag into their `kubectl set image` or compose pull.
+
 ## Tooling
 
 `pyproject.toml` is the canonical project config (modern uv-friendly

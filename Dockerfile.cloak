@@ -1,0 +1,107 @@
+# CloakBrowser optimized runtime image.
+#
+# CloakBrowser is a binary distribution — the wrapper is Python (MIT)
+# but the actual stealth Chromium is a ~200 MB binary the wrapper
+# auto-downloads on first launch. We CAN'T easily recompile it (their
+# source-level patches require their build process), so this image
+# focuses on:
+#
+#   - pre-fetching the Chromium binary at build time (predictable
+#     layer caching; no first-run download surprise)
+#   - LD_PRELOAD'd jemalloc (~15-30% memory savings on Chromium's
+#     small-alloc churn)
+#   - slim runtime base (debian:trixie-slim ~30 MB + Python ~50 MB +
+#     CloakBrowser binaries ~200 MB = ~280 MB total)
+#   - tini for proper PID-1 signal handling
+#
+# Why an opt image at all when spider-agent already bundles
+# CloakBrowser via pip? The default spider-agent image fetches the
+# binary at first runtime — slow + non-deterministic for cold-start.
+# This image bakes the binary into a layer so the spider-agent CAN
+# COPY it in via a multi-stage build (or use this as a base) and skip
+# the runtime fetch.
+#
+# Build:
+#
+#   docker build -f Dockerfile.cloak \
+#     --build-arg CLOAKBROWSER_VERSION=latest \
+#     -t cloak-opt-ag:latest .
+#
+# See scripts/build_browser.sh for the smart-build flow.
+
+ARG CLOAKBROWSER_VERSION=latest
+
+# ─── Stage 1: prefetch ──────────────────────────────────────────────
+# Install cloakbrowser via pip and trigger the binary download.
+# Subsequent builds use docker's layer cache unless this stage's
+# inputs change.
+FROM python:3.12-slim AS prefetch
+ARG CLOAKBROWSER_VERSION
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates curl \
+        # Chromium runtime deps (just what cloakbrowser's bundled
+        # binary needs; we keep these in the FINAL layer too).
+        libnss3 libnspr4 libdbus-1-3 libxkbcommon0 \
+        libxcomposite1 libxdamage1 libxrandr2 \
+        libgbm1 libpango-1.0-0 libcairo2 \
+        libasound2 libatk-bridge2.0-0 libatk1.0-0 \
+        libcups2 libdrm2 libxshmfence1 \
+        && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+        cloakbrowser$( [ "${CLOAKBROWSER_VERSION}" = "latest" ] || echo "==${CLOAKBROWSER_VERSION}" )
+
+# Force the binary download in the build, not at first run.
+# cloakbrowser exposes a CLI for this; if not, importing + a no-op
+# launch attempt is enough.
+RUN python -c "from cloakbrowser import launch_async; print('cloakbrowser', 'imported ok')" && \
+    # Trigger any auto-download by spawning a dry launch (helper).
+    # Tolerate failure here — some versions only download on the
+    # FIRST actual page open; either way the next layer will catch
+    # anything missing.
+    python -c "import asyncio; from cloakbrowser import launch_async; \
+        async def w(): \
+            try: \
+                b = await launch_async(headless=True); \
+                await b.close(); \
+            except Exception as e: \
+                print('launch warmup:', type(e).__name__, e); \
+        asyncio.run(w())" || true
+
+# ─── Stage 2: slim runtime ──────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+# Chromium runtime libs (same as prefetch; needed when the binary
+# actually runs) + jemalloc + tini.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libjemalloc2 \
+        tini \
+        # Chromium runtime libs
+        libnss3 libnspr4 libdbus-1-3 libxkbcommon0 \
+        libxcomposite1 libxdamage1 libxrandr2 \
+        libgbm1 libpango-1.0-0 libcairo2 \
+        libasound2 libatk-bridge2.0-0 libatk1.0-0 \
+        libcups2 libdrm2 libxshmfence1 \
+        && rm -rf /var/lib/apt/lists/* \
+        && apt-get clean
+
+# Pull in the cloakbrowser package + downloaded binary from prefetch.
+# The binary cache lives under ~/.cloakbrowser by default (operator
+# can override; we just COPY the whole home dir contents).
+COPY --from=prefetch /usr/local/lib/python3.12/site-packages \
+                     /usr/local/lib/python3.12/site-packages
+COPY --from=prefetch /root/.cloakbrowser /root/.cloakbrowser
+
+# jemalloc — significant memory savings on Chromium workloads.
+ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+ENV MALLOC_CONF=background_thread:true,metadata_thp:auto
+
+# This image's CMD is a sanity probe — it's meant to be used as a
+# BASE for spider-agent or imported via FROM in CI tests. The actual
+# entrypoint is up to whichever image consumes it.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python", "-c", "from cloakbrowser import launch_async; print('cloak-opt-ag', 'ready')"]

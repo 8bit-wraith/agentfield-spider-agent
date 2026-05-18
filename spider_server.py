@@ -36,11 +36,13 @@ import redis.asyncio as redis_asyncio
 from aiohttp import web
 
 from spider.browser import BROWSER_MAX_PAGES, CloakBrowserPool
+from spider.browsers import env_backend, make_pool, register_primary, shutdown_all
 from spider.feeds import poller
 from spider.fetch import FetchDeps
 from spider.politeness import HostBucket, RobotsCache
 from spider.queue import dispatcher
 from spider.routes import register_routes
+from spider.sessions import SessionManager
 
 logger = logging.getLogger("spider-http")
 logging.basicConfig(
@@ -57,15 +59,26 @@ async def _on_startup(app: web.Application) -> None:
     isn't fetched until the first ``/fetch/sync`` arrives.
     """
     http = aiohttp.ClientSession()
-    pool = CloakBrowserPool(max_pages=BROWSER_MAX_PAGES)
+    # Choose the primary browser backend from env. Defaults to cloak.
+    # The pool's _open() is lazy — Chromium / CDP isn't initialised
+    # until the first lease, so this is cheap even if we never fetch.
+    backend = env_backend()
+    pool = make_pool(backend, max_pages=BROWSER_MAX_PAGES)
+    register_primary(backend, pool)
     robots = RobotsCache(http)
     bucket = HostBucket()
-    deps = FetchDeps(http=http, pool=pool, robots=robots, bucket=bucket)
+    sessions = SessionManager()
+    deps = FetchDeps(
+        http=http, pool=pool, robots=robots,
+        bucket=bucket, sessions=sessions,
+    )
     app["http"] = http
     app["browser"] = pool
     app["robots"] = robots
     app["bucket"] = bucket
+    app["sessions"] = sessions
     app["deps"] = deps
+    logger.info("spider-http browser backend=%s", backend)
 
     redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
     r = redis_asyncio.from_url(redis_url, decode_responses=False)
@@ -128,12 +141,22 @@ async def _on_cleanup(app: web.Application) -> None:
                 pass
         await _cleanup_step(f"cancel.{key}", _await_cancel(), timeout=3.0)
 
-    # 2. Browser pool — slowest step (Chromium child may need 2-5s to die)
+    # 2. Sessions — close any open BrowserContexts before the pool
+    # they live on goes away
+    sessions: SessionManager | None = app.get("sessions")
+    if sessions is not None:
+        await _cleanup_step(
+            "sessions.close_all", sessions.close_all(), timeout=5.0,
+        )
+
+    # 3. Browser pool — slowest step (Chromium child may need 2-5s to die)
+    # Plus close any alternate pools the registry spun up.
     pool: CloakBrowserPool | None = app.get("browser")
     if pool is not None:
         await _cleanup_step("browser.shutdown", pool.shutdown(), timeout=10.0)
+    await _cleanup_step("browsers.shutdown_all", shutdown_all(), timeout=5.0)
 
-    # 3. Redis — should be near-instant; longer timeout is paranoia
+    # 4. Redis — should be near-instant; longer timeout is paranoia
     r = app.get("redis")
     if r is not None:
         await _cleanup_step("redis.aclose", r.aclose(), timeout=3.0)

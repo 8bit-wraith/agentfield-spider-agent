@@ -47,12 +47,18 @@ class FetchDeps:
 
     Constructed once in ``spider_server.build_app`` (and the future
     ``main.py`` agent surface) and passed to ``fetch_one`` per call.
+
+    ``sessions`` is the optional SessionManager for per-context
+    persistence — see ``spider/sessions.py``. When None (default),
+    callers can still pass session_id but it's a no-op (anonymous
+    lease).
     """
 
     http: aiohttp.ClientSession
     pool: CloakBrowserPool
     robots: RobotsCache
     bucket: HostBucket
+    sessions: Any = None  # Optional[SessionManager]
 
 
 # ─── URL rewrites ────────────────────────────────────────────────────
@@ -95,6 +101,7 @@ async def fetch_one(
     url: str,
     *,
     pool: Any = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Fetch a URL through the browser pool and return a job-record dict.
 
@@ -192,8 +199,15 @@ async def fetch_one(
 
     active_pool = pool if pool is not None else deps.pool
 
+    # Lease selection:
+    #   - session_id + SessionManager available -> use that session's context
+    #   - otherwise -> anonymous lease from the pool
     try:
-        async with active_pool.lease() as page:
+        if session_id and deps.sessions is not None:
+            lease_cm = deps.sessions.lease_page(session_id, pool=active_pool)
+        else:
+            lease_cm = active_pool.lease()
+        async with lease_cm as page:
             await page.goto(
                 fetch_url,
                 wait_until="networkidle" if NETWORK_IDLE else "load",

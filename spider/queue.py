@@ -40,6 +40,7 @@ async def run_and_record(
     use_browser: bool = False,
     proxy: str | None = None,
     browser: str | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Call ``dispatch_fetch`` and record the outcome.
 
@@ -66,6 +67,7 @@ async def run_and_record(
         use_browser=use_browser,
         proxy=proxy,
         browser=browser,
+        session_id=session_id,
     )
     result["source"] = source
     if redis is not None:

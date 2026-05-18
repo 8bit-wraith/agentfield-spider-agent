@@ -181,16 +181,26 @@ async def fetch_sync(request: web.Request) -> web.Response:
         return _json(
             {"error": "browser must be a string if provided"}, status=400,
         )
+    session_id = (payload or {}).get("session_id")
+    if session_id is not None and not isinstance(session_id, str):
+        return _json(
+            {"error": "session_id must be a string if provided"}, status=400,
+        )
 
     deps: FetchDeps = request.app["deps"]
     redis = request.app.get("redis")
-    result = await run_and_record(
-        deps, redis, url,
-        source="api-sync",
-        use_browser=use_browser,
-        proxy=proxy_override,
-        browser=browser_override,
-    )
+    try:
+        result = await run_and_record(
+            deps, redis, url,
+            source="api-sync",
+            use_browser=use_browser,
+            proxy=proxy_override,
+            browser=browser_override,
+            session_id=session_id,
+        )
+    except KeyError as e:
+        # Session not found / expired — surface cleanly rather than 500.
+        return _json({"error": str(e), "session_id": session_id}, status=404)
 
     status = result.get("status")
     if status == "ok":
@@ -506,6 +516,121 @@ async def extract(request: web.Request) -> web.Response:
         return _json({"error": f"{type(e).__name__}: {e}", "url": url}, status=502)
 
 
+# ─── /sessions ──────────────────────────────────────────────────────
+async def sessions_create(request: web.Request) -> web.Response:
+    """``POST /sessions`` — create a new browser session (BrowserContext).
+
+    Body (all fields optional)::
+
+        {
+          "name": "alice",                  // display name; not required
+          "metadata": {"user_id": "..."},   // free-form
+          "user_agent": "...",              // override default UA
+          "viewport": {"width": 1280, "height": 720},
+          "backend": "cloak" | "lightpanda"  // default: env-configured
+        }
+
+    Returns the session info dict; the ``id`` field is what callers
+    pass on subsequent ``/fetch/sync`` requests via ``session_id``.
+    """
+    payload, err = await _read_json(request)
+    if err:
+        return _json({"error": err}, status=400)
+    body = payload or {}
+
+    sessions = request.app.get("sessions")
+    if sessions is None:
+        return _json({"error": "session manager not configured"}, status=503)
+
+    name = body.get("name")
+    if name is not None and not isinstance(name, str):
+        return _json({"error": "name must be a string"}, status=400)
+    metadata = body.get("metadata") or {}
+    if not isinstance(metadata, dict):
+        return _json({"error": "metadata must be an object"}, status=400)
+    user_agent = body.get("user_agent")
+    if user_agent is not None and not isinstance(user_agent, str):
+        return _json({"error": "user_agent must be a string"}, status=400)
+    viewport = body.get("viewport")
+    if viewport is not None and (
+        not isinstance(viewport, dict)
+        or "width" not in viewport or "height" not in viewport
+    ):
+        return _json(
+            {"error": "viewport must be {width: int, height: int}"},
+            status=400,
+        )
+
+    # Backend selection: default to the primary pool, allow override.
+    from .browsers import get_or_create_pool, normalize_backend
+    backend_kwarg = body.get("backend")
+    if backend_kwarg is not None and not isinstance(backend_kwarg, str):
+        return _json({"error": "backend must be a string"}, status=400)
+    backend = normalize_backend(backend_kwarg)
+    deps: FetchDeps = request.app["deps"]
+    if backend == _primary_backend_for(deps):
+        pool = deps.pool
+    else:
+        pool = await get_or_create_pool(backend)
+
+    try:
+        info = await sessions.create(
+            pool=pool,
+            name=name,
+            metadata=metadata,
+            user_agent=user_agent,
+            viewport=viewport,
+            backend_label=backend,
+        )
+    except Exception as e:
+        return _json(
+            {"error": f"{type(e).__name__}: {e}"}, status=502,
+        )
+    return _json(info.model_dump(), status=200)
+
+
+async def sessions_list(request: web.Request) -> web.Response:
+    """``GET /sessions`` — list active sessions, newest-touched first."""
+    sessions = request.app.get("sessions")
+    if sessions is None:
+        return _json({"sessions": []})
+    infos = await sessions.list()
+    return _json({"sessions": [i.model_dump() for i in infos]})
+
+
+async def sessions_get(request: web.Request) -> web.Response:
+    """``GET /sessions/{id}`` — get one session's info."""
+    sessions = request.app.get("sessions")
+    if sessions is None:
+        return _json({"error": "session manager not configured"}, status=503)
+    sid = request.match_info["id"]
+    info = await sessions.get(sid)
+    if info is None:
+        return _json({"error": "session not found"}, status=404)
+    return _json(info.model_dump())
+
+
+async def sessions_delete(request: web.Request) -> web.Response:
+    """``DELETE /sessions/{id}`` — close a session, freeing its context."""
+    sessions = request.app.get("sessions")
+    if sessions is None:
+        return _json({"error": "session manager not configured"}, status=503)
+    sid = request.match_info["id"]
+    closed = await sessions.close(sid)
+    if not closed:
+        return _json({"error": "session not found"}, status=404)
+    return _json({"ok": True, "session_id": sid})
+
+
+def _primary_backend_for(deps: FetchDeps) -> str:
+    """Return the backend name of the primary pool. Reuses the class-name
+    heuristic from dispatch.py without importing it (avoid cycle)."""
+    cls_name = type(deps.pool).__name__.lower()
+    if "lightpanda" in cls_name:
+        return "lightpanda"
+    return "cloak"
+
+
 # ─── registration ───────────────────────────────────────────────────
 def register_routes(app: web.Application) -> None:
     """Wire all v1 routes into ``app``. Idempotent across distinct apps."""
@@ -524,6 +649,11 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post("/sitemap/parse", sitemap_handler)
     app.router.add_post("/screenshot", screenshot)
     app.router.add_post("/extract", extract)
+    # Sessions
+    app.router.add_post("/sessions", sessions_create)
+    app.router.add_get("/sessions", sessions_list)
+    app.router.add_get("/sessions/{id}", sessions_get)
+    app.router.add_delete("/sessions/{id}", sessions_delete)
 
 
 __all__ = [

@@ -80,6 +80,7 @@ async def dispatch_fetch(
     use_browser: bool = False,
     proxy: str | None = None,
     browser: str | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Route ``url`` to the right fetcher.
 
@@ -96,6 +97,11 @@ async def dispatch_fetch(
                  ``"cloak"`` (default) or ``"lightpanda"`` (beta).
                  Unknown values fall back to ``"cloak"``. Lazy: the
                  alternate pool only gets constructed on first use.
+    session_id   Browser session id (see ``spider/sessions.py``).
+                 When set + the deps include a SessionManager, the
+                 fetch uses that session's persistent context.
+                 Specialized HTTP fetchers ignore session_id (no
+                 context concept).
 
     Returns the same flat-dict shape as ``fetch_one``. Errors are
     captured into ``status="error"`` rather than raised.
@@ -103,7 +109,9 @@ async def dispatch_fetch(
     chosen_backend: Backend = normalize_backend(browser)
 
     if use_browser:
-        return await _run_browser_path(deps, url, backend=chosen_backend)
+        return await _run_browser_path(
+            deps, url, backend=chosen_backend, session_id=session_id,
+        )
 
     kind = classify(url)
     if kind == "github":
@@ -117,7 +125,9 @@ async def dispatch_fetch(
     if kind == "docling":
         return await fetch_via_docling(url, proxy=proxy)
     # ``generic`` -> browser-rendered path.
-    return await _run_browser_path(deps, url, backend=chosen_backend)
+    return await _run_browser_path(
+        deps, url, backend=chosen_backend, session_id=session_id,
+    )
 
 
 async def _run_browser_path(
@@ -125,6 +135,7 @@ async def _run_browser_path(
     url: str,
     *,
     backend: Backend,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """Run ``fetch_one`` with the requested browser backend.
 
@@ -134,9 +145,9 @@ async def _run_browser_path(
     """
     # If the requested backend matches the primary pool, just use it.
     if backend == _primary_backend(deps):
-        return await fetch_one(deps, url)
+        return await fetch_one(deps, url, session_id=session_id)
     alt_pool = await get_or_create_pool(backend)
-    return await fetch_one(deps, url, pool=alt_pool)
+    return await fetch_one(deps, url, pool=alt_pool, session_id=session_id)
 
 
 def _primary_backend(deps: FetchDeps) -> Backend:

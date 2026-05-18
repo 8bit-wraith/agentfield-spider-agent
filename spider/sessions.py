@@ -146,7 +146,16 @@ class SessionManager:
         ``get_browser`` directly).
         """
         sid = uuid.uuid4().hex[:12]
+        # Monotonic last_used — if two sessions are created in the
+        # same millisecond, the second gets ts+1 so LRU eviction is
+        # deterministic. ``int(time.time() * 1000)`` collides on fast
+        # paths; the bump keeps the ordering well-defined.
         now = int(time.time() * 1000)
+        if self._sessions:
+            max_existing = max(
+                s.info.last_used for s in self._sessions.values()
+            )
+            now = max(now, max_existing + 1)
 
         # Open the browser if it isn't already, and reach into its
         # context constructor. Both LightpandaPool and CloakBrowserPool
@@ -260,7 +269,14 @@ class SessionManager:
 
         page = await s.context.new_page()
         s.info.n_pages_opened += 1
-        s.info.last_used = now_ms
+        # Monotonic bump — same rationale as create(). Without this,
+        # touching session A and then creating session B in the same
+        # millisecond would tie at LRU eviction.
+        other_max = 0
+        for other_id, other_s in self._sessions.items():
+            if other_id != session_id and other_s.info.last_used > other_max:
+                other_max = other_s.info.last_used
+        s.info.last_used = max(now_ms, other_max + 1)
         try:
             yield page
         finally:

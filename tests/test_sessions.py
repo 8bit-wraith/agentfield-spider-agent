@@ -140,12 +140,13 @@ def test_list_newest_first() -> None:
     mgr = SessionManager()
 
     async def _go():
-        # Create three sessions; second is bumped by leasing a page.
+        # Create three sessions; sleep long enough that timestamps
+        # differ at ms resolution on any CI runner. 50ms is well above
+        # any sleep-precision floor.
         a = await mgr.create(pool=pool, name="a")
-        # Sleep enough that timestamps differ at ms resolution.
-        await asyncio.sleep(0.005)
+        await asyncio.sleep(0.05)
         b = await mgr.create(pool=pool, name="b")
-        await asyncio.sleep(0.005)
+        await asyncio.sleep(0.05)
         c = await mgr.create(pool=pool, name="c")
         return a, b, c
 
@@ -271,19 +272,20 @@ def test_eviction_kicks_lru_when_over_cap() -> None:
 
     async def _go():
         a = await mgr.create(pool=pool, name="a")
-        await asyncio.sleep(0.005)
+        await asyncio.sleep(0.05)
         b = await mgr.create(pool=pool, name="b")
-        # Touch `a` so it's most-recently-used.
+        await asyncio.sleep(0.05)
+        # Touch `a` so it's most-recently-used (now > b).
         async with mgr.lease_page(a.id, pool=pool):
             pass
-        await asyncio.sleep(0.005)
-        # Adding c should evict `b` (LRU).
+        await asyncio.sleep(0.05)
+        # Adding c should evict `b` (now the LRU).
         c = await mgr.create(pool=pool, name="c")
         return a.id, b.id, c.id
 
     a_id, b_id, c_id = _run(_go())
     listed_ids = {s.id for s in _run(mgr.list())}
-    assert listed_ids == {a_id, c_id}
+    assert listed_ids == {a_id, c_id}, f"expected b ({b_id}) evicted; got {listed_ids}"
 
 
 # ─── env defaults ────────────────────────────────────────────────────

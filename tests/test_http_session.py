@@ -19,16 +19,19 @@ def test_http_session_uses_explicit_tcp_connector(monkeypatch) -> None:
     import spider_server
 
     spider_server = importlib.reload(spider_server)
-    sess = spider_server._build_http_session()
-    try:
-        conn = sess.connector
-        assert isinstance(conn, aiohttp.TCPConnector)
-        assert conn.force_close is False
-        assert conn.limit == 30
-        assert conn.limit_per_host == 7
-        assert conn._keepalive_timeout == 12.5  # noqa: SLF001
-    finally:
-        asyncio.run(sess.close())
+    async def _go() -> None:
+        sess = spider_server._build_http_session()
+        try:
+            conn = sess.connector
+            assert isinstance(conn, aiohttp.TCPConnector)
+            assert conn.force_close is False
+            assert conn.limit == 30
+            assert conn.limit_per_host == 7
+            assert conn._keepalive_timeout == 12.5  # noqa: SLF001
+        finally:
+            await sess.close()
+
+    asyncio.run(_go())
 
 
 def test_http_session_reuses_connections() -> None:

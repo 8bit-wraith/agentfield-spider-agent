@@ -29,12 +29,25 @@ class BrowserPool(Protocol):
     ``evaluate(js)``, and ``close()``. CloakBrowser and Playwright both
     satisfy this; the Lightpanda variant uses Playwright's CDP client
     against an external Lightpanda process.
+
+    ``ensure_browser()`` opens the browser if it isn't already and
+    returns the live Browser instance. Used by ``SessionManager`` to
+    pull the Browser without leasing a page (we need
+    ``browser.new_context()``, not a page). Idempotent; safe to call
+    concurrently — implementations gate on ``self._lock``.
     """
 
     _browser: Any  # truthy when open
 
     def lease(self) -> AbstractAsyncContextManager[Any]:
         """Yield a Page-like object; auto-closed on context exit."""
+        ...
+
+    async def ensure_browser(self) -> Any:
+        """Open the browser if needed; return the live Browser.
+
+        Concurrent callers see one ``_open()`` invocation, not N.
+        """
         ...
 
     async def shutdown(self) -> None:

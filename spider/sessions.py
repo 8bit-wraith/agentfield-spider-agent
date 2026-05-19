@@ -190,11 +190,7 @@ class SessionManager:
         evasion: EvasionBase | None = None
         warming_enabled = warming in {"search-click", "hub"}
 
-        if (
-            persona is not None
-            or evasion_rate_per_min is not None
-            or warming_enabled
-        ):
+        if persona is not None or evasion_rate_per_min is not None or warming_enabled:
             cfg = EvasionConfig(persona=persona, backend=backend_label)
             if evasion_rate_per_min is not None:
                 cfg.rate_per_min = evasion_rate_per_min

@@ -81,6 +81,23 @@ async def test_pre_goto_locale_drives_google_tld() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pre_goto_uses_custom_warming_query_when_provided() -> None:
+    evasion = EvasionBase(
+        EvasionConfig(
+            backend="cloak",
+            warming="search-click",
+            warming_queries=["  custom topic query  "],
+        )
+    )
+    page = _WarmPage()
+
+    await evasion.pre_goto(page, "https://example.com/target")
+
+    assert len(page.goto_calls) == 1
+    assert "q=custom+topic+query" in page.goto_calls[0][0]
+
+
+@pytest.mark.asyncio
 async def test_pre_goto_hub_mode_visits_hub() -> None:
     evasion = EvasionBase(EvasionConfig(warming="hub"))
     page = _WarmPage()

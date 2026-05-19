@@ -161,3 +161,22 @@ def test_post_sessions_rejects_warming_queries_without_warming_mode(make_deps) -
             assert "warming_queries requires warming" in body["error"]
 
     _run(_go())
+
+
+def test_post_sessions_rejects_warming_queries_for_hub_mode(make_deps) -> None:
+    deps = _deps_for_sessions(make_deps)
+    profiles = _FakeProfiles()
+    app = _build_app(deps, profiles=profiles)
+
+    async def _go() -> None:
+        async with TestServer(app) as server, TestClient(server) as client:
+            r = await client.post(
+                "/sessions",
+                data=orjson.dumps({"warming": "hub", "warming_queries": ["hello world"]}),
+                headers={"Content-Type": "application/json"},
+            )
+            assert r.status == 400
+            body = await r.json()
+            assert "warming_queries requires warming to be search-click" in body["error"]
+
+    _run(_go())

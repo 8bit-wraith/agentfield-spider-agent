@@ -42,7 +42,7 @@ hn / reddit / docling) before falling through to the browser pool.
 | HTTP | `POST /sitemap/parse {url, queue?, max_urls?}` | `{url, urls: [...], count, queued}` |
 | HTTP | `POST /screenshot {url, full_page?}` | `{ok, png_b64, ms}` |
 | HTTP | `POST /extract {url, selector, attr?}` | `{ok, matches: [...], ms}` |
-| HTTP | `POST /act {task, session_id, model?, max_steps?, allowed_hosts?}` | same dict as `act(...)`; returns `501` without the `[browser-use]` extra |
+| HTTP | `POST /act {task, session_id, model?, max_steps?, allowed_hosts?}` | same dict as `act(...)`; reuses the session's existing `BrowserContext` (no second browser launched). Per-call `allowed_hosts` unions with the env-level `SPIDER_AGENT_ALLOWED_HOSTS` SSRF allowlist. Returns `501` without the `[browser-use]` extra. See [`AGENTS.md` § Browser-use Agent](AGENTS.md#browser-use-agent-post-act-spider-agentact). |
 | HTTP | `GET /jobs?limit=50` | recent fetch outcomes |
 | HTTP | `GET /health` | snapshot |
 

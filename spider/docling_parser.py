@@ -257,7 +257,8 @@ async def fetch_via_docling(
         )
 
     md: str = parsed["markdown"]
-    if len(md) > max_text_chars:
+    was_truncated = len(md) > max_text_chars
+    if was_truncated:
         truncated_by = len(md) - max_text_chars
         md = md[:max_text_chars] + f"\n\n[truncated {truncated_by} chars]"
     title = _first_heading(md) or url
@@ -281,7 +282,7 @@ async def fetch_via_docling(
             "n_pages": parsed.get("n_pages"),
             "n_tables": len(parsed["tables"]),
             "tables_preview": parsed["tables"][:tables_preview],
-            "truncated": len(parsed["markdown"]) > len(md),
+            "truncated": was_truncated,
             "max_text_chars": max_text_chars,
         },
     }

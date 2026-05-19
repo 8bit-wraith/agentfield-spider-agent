@@ -258,6 +258,21 @@ def test_fetch_via_docling_respects_table_and_text_limits(monkeypatch) -> None:
     assert "[truncated" in out["text"]
 
 
+def test_fetch_via_docling_truncated_flag_true_for_small_overrun(monkeypatch) -> None:
+    _install_fake_docling(
+        monkeypatch,
+        markdown="# T\n\n" + ("x" * 1000),
+        tables=[],
+        n_pages=1,
+    )
+    monkeypatch.setenv("SPIDER_DOCLING_MAX_TEXT_CHARS", "1000")
+
+    out = _run(fetch_via_docling("https://example.com/edge.pdf"))
+    assert out["status"] == "ok"
+    assert out["metadata"]["truncated"] is True
+    assert "[truncated" in out["text"]
+
+
 def test_fetch_via_docling_timeout(monkeypatch) -> None:
     class _SlowConverter:
         def convert(self, url: str) -> Any:  # noqa: ARG002

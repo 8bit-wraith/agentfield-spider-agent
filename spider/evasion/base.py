@@ -12,8 +12,8 @@ Applies to a ``BrowserContext`` + ``Page`` returned from any backend
   rate.py        per-session token bucket so one session can't burn
                  its credibility with too many requests.
 
-Three lifecycle hooks
----------------------
+Four lifecycle hooks
+--------------------
 
   context_kwargs()
     Kwargs to merge into ``browser.new_context(**kwargs)``. Persona-
@@ -24,6 +24,11 @@ Three lifecycle hooks
     One-shot setup on the freshly created context. Adds init scripts
     (WebRTC block, etc.) that run before any page script on every
     navigation.
+
+  pre_goto(page, target_url)
+    Runs before each target ``page.goto()``. Optional session warm-up
+    that establishes basic navigation history in the same browser
+    context (e.g. search -> click path) before the real target load.
 
   post_goto(page)
     Runs after each successful ``page.goto()`` in the fetch pipeline.
@@ -45,7 +50,8 @@ the full treatment.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import quote_plus, urlparse
 
 from spider.evasion.identity import Persona, get_persona
 from spider.evasion.network import WEBRTC_BLOCK_JS
@@ -78,6 +84,39 @@ class EvasionConfig:
     rate_per_min: int = 60
     backend: str = "cloak"
     extra_headers: dict[str, str] = field(default_factory=dict)
+    warming: Literal["off", "search-click", "hub"] = "off"
+    warming_queries: list[str] | None = None
+
+
+_WARMUP_TIMEOUT_MS = 10_000
+_HUB_WARMUP_URLS: tuple[str, ...] = ("https://dev.to/", "https://github.com/trending")
+_SEARCH_CLICK_SELECTORS: tuple[str, ...] = (
+    "a[href^='https://']:not([href*='google.'])",
+    "a[href^='http://']:not([href*='google.'])",
+)
+
+
+def _google_domain_for_locale(locale: str | None) -> str:
+    """Map locale to a reasonable Google domain."""
+    if not locale:
+        return "google.com"
+
+    lower = locale.lower()
+    if lower.startswith("en-gb"):
+        return "google.co.uk"
+    if lower.startswith("pt-br"):
+        return "google.com.br"
+
+    language = lower.split("-", 1)[0]
+    by_language = {
+        "de": "google.de",
+        "fr": "google.fr",
+        "es": "google.es",
+        "it": "google.it",
+        "pt": "google.pt",
+        "nl": "google.nl",
+    }
+    return by_language.get(language, "google.com")
 
 
 class EvasionBase:
@@ -149,6 +188,28 @@ class EvasionBase:
         if self._rate is not None:
             await self._rate.acquire()
 
+    async def pre_goto(self, page: Any, target_url: str) -> None:
+        """Warm session state before navigating to the target URL.
+
+        Best effort by design: warm-up failures are logged and swallowed
+        so target navigation can still proceed.
+        """
+        if self.config.warming == "off":
+            return
+
+        try:
+            if self.config.warming == "search-click":
+                await self._search_click_warmup(page, target_url)
+            elif self.config.warming == "hub":
+                await self._hub_warmup(page)
+        except Exception as e:
+            log(
+                "evasion",
+                state="pre-goto-warmup-failed",
+                backend=self.config.backend,
+                msg=f"{type(e).__name__}: {e}",
+            )
+
     async def post_goto(self, page: Any) -> None:
         """Light behavioral simulation after ``page.goto`` succeeds.
 
@@ -162,6 +223,46 @@ class EvasionBase:
         from .behavioral import dwell_and_scroll
 
         await dwell_and_scroll(page, backend=self.config.backend)
+
+    async def _search_click_warmup(self, page: Any, target_url: str) -> None:
+        domain = _google_domain_for_locale(self.persona.locale if self.persona else None)
+        query = self._warmup_query(target_url)
+        search_url = f"https://www.{domain}/search?q={quote_plus(query)}"
+        await page.goto(
+            search_url,
+            wait_until="domcontentloaded",
+            timeout=_WARMUP_TIMEOUT_MS,
+        )
+
+        # Lightpanda's click reliability is still partial; search-only
+        # warmup still establishes plausible history without brittle
+        # click behavior.
+        if self.config.backend == "lightpanda":
+            return
+
+        for selector in _SEARCH_CLICK_SELECTORS:
+            try:
+                await page.click(selector, timeout=2_000)
+                break
+            except Exception:
+                continue
+
+    async def _hub_warmup(self, page: Any) -> None:
+        await page.goto(
+            _HUB_WARMUP_URLS[0],
+            wait_until="domcontentloaded",
+            timeout=_WARMUP_TIMEOUT_MS,
+        )
+
+    def _warmup_query(self, target_url: str) -> str:
+        if self.config.warming_queries:
+            for query in self.config.warming_queries:
+                if query.strip():
+                    return query.strip()
+        host = urlparse(target_url).hostname
+        if host:
+            return host
+        return "latest technology news"
 
 
 __all__ = ["EvasionBase", "EvasionConfig"]

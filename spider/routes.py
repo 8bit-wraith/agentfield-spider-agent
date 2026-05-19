@@ -541,6 +541,8 @@ async def sessions_create(request: web.Request) -> web.Response:
           "user_agent": "...",              // override default UA
           "viewport": {"width": 1280, "height": 720},
           "backend": "cloak" | "lightpanda", // default: env-configured
+          "warming": "off" | "search-click" | "hub",
+          "warming_queries": ["query 1", "..."],
           "profile": "my-saved-profile"     // hydrate from ProfileStore (503/404)
         }
 
@@ -596,6 +598,24 @@ async def sessions_create(request: web.Request) -> web.Response:
             {"error": "evasion_rate_per_min must be an integer"},
             status=400,
         )
+    warming = body.get("warming")
+    if warming is not None:
+        if not isinstance(warming, str):
+            return _json({"error": "warming must be a string"}, status=400)
+        if warming not in {"off", "search-click", "hub"}:
+            return _json(
+                {"error": "warming must be one of: off, search-click, hub"},
+                status=400,
+            )
+    warming_queries = body.get("warming_queries")
+    if warming_queries is not None:
+        if not isinstance(warming_queries, list) or any(
+            not isinstance(item, str) for item in warming_queries
+        ):
+            return _json(
+                {"error": "warming_queries must be a list of strings"},
+                status=400,
+            )
 
     profile = body.get("profile")
     if profile is not None and not isinstance(profile, str):
@@ -636,6 +656,8 @@ async def sessions_create(request: web.Request) -> web.Response:
             backend_label=backend,
             persona=persona,
             evasion_rate_per_min=evasion_rate_per_min,
+            warming=warming,
+            warming_queries=warming_queries,
             storage_state=storage_state,
         )
     except Exception as e:

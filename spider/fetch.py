@@ -195,6 +195,7 @@ async def _fetch_one_core(
             # protects the goto itself.
             if evasion is not None:
                 await evasion.check_rate()
+                await evasion.pre_goto(page, fetch_url)
             await page.goto(
                 fetch_url,
                 wait_until="networkidle" if NETWORK_IDLE else "load",

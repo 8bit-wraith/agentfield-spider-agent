@@ -53,7 +53,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -142,6 +142,8 @@ class SessionManager:
         backend_label: str = "cloak",
         persona: str | None = None,
         evasion_rate_per_min: int | None = None,
+        warming: Literal["off", "search-click", "hub"] | None = None,
+        warming_queries: list[str] | None = None,
         storage_state: dict[str, Any] | None = None,
     ) -> SessionInfo:
         """Create a new session backed by a fresh BrowserContext.
@@ -160,10 +162,17 @@ class SessionManager:
         defaults.
 
         ``evasion_rate_per_min`` overrides the default per-session
-        request budget (60). Set to a number <= 0 to disable. Setting
-        either ``persona`` or ``evasion_rate_per_min`` attaches an
-        ``EvasionBase`` to the session; otherwise the session has no
-        evasion layer (legacy behavior preserved).
+        request budget (60). Set to a number <= 0 to disable.
+
+        ``warming`` controls optional pre-goto warmup:
+          - ``"off"`` (default): no warmup
+          - ``"search-click"``: best-effort Google search + click path
+          - ``"hub"``: visit one neutral hub page before target goto
+
+        Setting any evasion field (``persona``, ``evasion_rate_per_min``,
+        ``warming``, or ``warming_queries``) attaches an ``EvasionBase``
+        to the session; otherwise the session has no evasion layer
+        (legacy behavior preserved).
         """
         sid = uuid.uuid4().hex[:12]
         # Monotonic last_used — if two sessions are created in the
@@ -179,10 +188,19 @@ class SessionManager:
         # so we can pull persona-derived kwargs (UA, locale, TZ,
         # viewport, geo, headers) into the new_context call.
         evasion: EvasionBase | None = None
-        if persona is not None or evasion_rate_per_min is not None:
+        if (
+            persona is not None
+            or evasion_rate_per_min is not None
+            or warming is not None
+            or warming_queries is not None
+        ):
             cfg = EvasionConfig(persona=persona, backend=backend_label)
             if evasion_rate_per_min is not None:
                 cfg.rate_per_min = evasion_rate_per_min
+            if warming is not None:
+                cfg.warming = warming
+            if warming_queries is not None:
+                cfg.warming_queries = warming_queries
             evasion = EvasionBase(cfg)
 
         # Open the browser if it isn't already, and reach into its

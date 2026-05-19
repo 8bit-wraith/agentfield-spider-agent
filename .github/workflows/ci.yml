@@ -107,15 +107,17 @@ jobs:
   # breakage early without polluting :latest.
   # On push to main: builds + pushes :latest and :sha-<7> to Docker Hub.
   #
-  # Required repo configuration (Settings → Secrets and variables → Actions):
+  # Required configuration (in the GitHub "main" Environment):
   #   Variables: DOCKER_USER
   #   Secrets:   DOCKER_PAT
-  # The Buildx Cloud endpoint (60ph3r/main-gh-builder-joe) is read-only
-  # from the workflow — owner manages it in Docker Cloud.
+  # ``environment: main`` scopes the job to that environment so the
+  # secrets are accessible. The Buildx Cloud endpoint
+  # (60ph3r/main-gh-builder-joe) is owner-managed in Docker Cloud.
   docker:
     name: docker
     runs-on: ubuntu-latest
     needs: test
+    environment: main
     timeout-minutes: 30
     steps:
       - name: Checkout

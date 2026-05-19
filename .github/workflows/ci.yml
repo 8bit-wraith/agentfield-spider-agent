@@ -107,9 +107,9 @@ jobs:
   # breakage early without polluting :latest.
   # On push to main: builds + pushes :latest and :sha-<7> to Docker Hub.
   #
-  # Required configuration (in the GitHub "main" Environment):
-  #   Variables: DOCKER_USER
-  #   Secrets:   DOCKER_PAT
+  # Required configuration (in the GitHub "main" Environment, Secrets tab):
+  #   DOCKER_USER  — Docker Hub account name
+  #   DOCKER_PAT   — Docker Hub personal access token, R/W/D scope
   # ``environment: main`` scopes the job to that environment so the
   # secrets are accessible. The Buildx Cloud endpoint
   # (60ph3r/main-gh-builder-joe) is owner-managed in Docker Cloud.
@@ -126,7 +126,7 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ vars.DOCKER_USER }}
+          username: ${{ secrets.DOCKER_USER }}
           password: ${{ secrets.DOCKER_PAT }}
 
       - name: Set up Docker Buildx

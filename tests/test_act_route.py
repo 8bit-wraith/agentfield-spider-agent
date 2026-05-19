@@ -69,10 +69,13 @@ class _FakeBrowser:
 
 
 class _FakePool:
-    """Pool stub. SessionManager pokes ``_browser`` directly."""
+    """Pool stub. SessionManager calls ``ensure_browser()`` to grab the Browser."""
 
     def __init__(self) -> None:
         self._browser = _FakeBrowser()
+
+    async def ensure_browser(self) -> _FakeBrowser:
+        return self._browser
 
 
 class _FakeHttp:

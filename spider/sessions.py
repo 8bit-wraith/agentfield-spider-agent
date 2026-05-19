@@ -185,11 +185,10 @@ class SessionManager:
                 cfg.rate_per_min = evasion_rate_per_min
             evasion = EvasionBase(cfg)
 
-        # Open the browser if it isn't already, and reach into its
-        # context constructor. Both LightpandaPool and CloakBrowserPool
-        # have a `_browser` attribute populated after `_open` runs;
-        # we ensure it's open by calling `lease()` briefly if needed.
-        browser = await _get_browser(pool)
+        # Open the browser if it isn't already, and grab the live
+        # Browser instance via the pool's ``ensure_browser()`` method
+        # (part of the BrowserPool Protocol).
+        browser = await pool.ensure_browser()
 
         # Context construction kwargs — same names Playwright uses, so
         # both backends accept the call signature. Persona-derived
@@ -361,22 +360,6 @@ class SessionManager:
             with suppress(Exception):  # pragma: no cover
                 await s.context.close()
             log("session", state="evicted-lru", id=lru_id)
-
-
-async def _get_browser(pool: Any) -> Any:
-    """Reach into the pool to retrieve its open ``Browser``.
-
-    Both LightpandaPool and CloakBrowserPool keep the browser at
-    ``pool._browser``. We open it via a no-op lease if needed —
-    less invasive than adding a ``get_browser`` method to the
-    Protocol just for SessionManager.
-    """
-    if getattr(pool, "_browser", None) is None:
-        # Trigger pool open via a brief lease. The lease's page is
-        # immediately discarded; the side effect is _browser being set.
-        async with pool.lease() as _:  # noqa: F841
-            pass
-    return pool._browser  # noqa: SLF001
 
 
 __all__ = [

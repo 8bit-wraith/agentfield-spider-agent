@@ -66,13 +66,19 @@ class _FakeBrowser:
 class _FakePool:
     """Mimics CloakBrowserPool / LightpandaPool just enough for SessionManager.
 
-    SessionManager calls ``_get_browser(pool)`` which checks
-    ``pool._browser`` and falls back to ``await pool.lease()``. We set
-    ``_browser`` directly so no lease is needed.
+    SessionManager calls ``await pool.ensure_browser()`` to get the
+    open Browser. We expose ``_browser`` for assertions and return it
+    from ``ensure_browser`` (also recording the call count so tests
+    can verify idempotency).
     """
 
     def __init__(self) -> None:
         self._browser = _FakeBrowser()
+        self.ensure_calls = 0
+
+    async def ensure_browser(self) -> _FakeBrowser:
+        self.ensure_calls += 1
+        return self._browser
 
 
 # ─── basics ──────────────────────────────────────────────────────────

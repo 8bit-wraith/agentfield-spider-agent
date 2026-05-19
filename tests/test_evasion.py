@@ -87,6 +87,9 @@ class _FakePool:
     def __init__(self) -> None:
         self._browser = _FakeBrowser()
 
+    async def ensure_browser(self) -> _FakeBrowser:
+        return self._browser
+
 
 # ─── persona presets ────────────────────────────────────────────────
 def test_list_personas_includes_expected_names() -> None:

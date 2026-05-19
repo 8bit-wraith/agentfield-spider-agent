@@ -121,6 +121,19 @@ class CloakBrowserPool:
         else:
             log("browser", state="closed", reason=reason)
 
+    async def ensure_browser(self) -> Any:
+        """Open the browser if needed; return the live Browser.
+
+        Used by ``SessionManager.create()`` to grab the Browser
+        without paying for a throwaway page lease. ``self._lock``
+        keeps concurrent callers from racing into multiple
+        ``_open()`` calls.
+        """
+        async with self._lock:
+            if self._browser is None:
+                await self._open()
+        return self._browser
+
     @contextlib.asynccontextmanager
     async def lease(self) -> Any:
         """Yield a fresh ``Page`` from the shared browser.

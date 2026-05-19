@@ -232,3 +232,29 @@ def test_lightpanda_pool_satisfies_browser_pool_protocol() -> None:
 
     pool = LightpandaPool()
     assert isinstance(pool, BrowserPool)
+
+
+# ─── ensure_browser ──────────────────────────────────────────────────
+def test_lightpanda_ensure_browser_opens_then_idempotent() -> None:
+    """First ``ensure_browser`` triggers ``_open``; subsequent calls
+    return the same instance without re-opening (idempotent).
+    """
+    open_calls = 0
+    fake_browser = _FakeBrowser()
+
+    async def fake_connect(cdp_url: str) -> _FakeBrowser:
+        nonlocal open_calls
+        open_calls += 1
+        return fake_browser
+
+    pool = LightpandaPool(connect_factory=fake_connect)
+
+    async def _go() -> tuple[Any, Any, int]:
+        b1 = await pool.ensure_browser()
+        b2 = await pool.ensure_browser()
+        return b1, b2, open_calls
+
+    b1, b2, n = _run(_go())
+    assert b1 is fake_browser
+    assert b2 is fake_browser  # same instance, not a new connect
+    assert n == 1  # only ONE _open call despite two ensure_browser callers

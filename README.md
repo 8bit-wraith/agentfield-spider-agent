@@ -193,6 +193,16 @@ By default the same setup path also installs Docker CLI + buildx
 `DOCKER_USER` and `DOCKER_PAT` are present (registry defaults to
 `DOCKER_REGISTRY=docker.io`).
 
+If your environment lacks root/sudo, setup now warns and continues by
+default. Set `SPIDER_INSTALL_DOCKER_STRICT=1` to force a hard failure
+instead.
+
+Bootstrap validation helper:
+
+```bash
+./scripts/check-env-bootstrap.sh
+```
+
 For local containerized development, `.devcontainer/devcontainer.json`
 uses `.devcontainer/postCreate.sh`, which delegates to the same shared
 bootstrap script.

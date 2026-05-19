@@ -110,12 +110,13 @@ jobs:
     environment: main
     timeout-minutes: 30
     env:
-      DOCKER_USER: ${{ secrets.DOCKER_USER || vars.DOCKER_USER }}
+      DOCKER_USER: ${{ github.event_name == 'pull_request' && 'localbuild' || secrets.DOCKER_USER || vars.DOCKER_USER }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKER_USER }}

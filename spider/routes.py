@@ -616,6 +616,11 @@ async def sessions_create(request: web.Request) -> web.Response:
                 {"error": "warming_queries must be a list of strings"},
                 status=400,
             )
+        if warming not in {"search-click", "hub"}:
+            return _json(
+                {"error": "warming_queries requires warming to be search-click or hub"},
+                status=400,
+            )
 
     profile = body.get("profile")
     if profile is not None and not isinstance(profile, str):

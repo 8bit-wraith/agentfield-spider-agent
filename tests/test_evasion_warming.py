@@ -10,6 +10,7 @@ import pytest
 
 from spider.evasion import EvasionBase, EvasionConfig
 from spider.fetch import FetchDeps, fetch_one
+from spider.sessions import SessionManager
 
 
 @dataclass
@@ -128,6 +129,30 @@ class _SessionShim:
         return pool.lease()
 
 
+@dataclass
+class _SessionCtx:
+    async def new_page(self) -> _WarmPage:
+        return _WarmPage()
+
+    async def close(self) -> None:
+        return None
+
+
+@dataclass
+class _SessionBrowser:
+    contexts: list[_SessionCtx] = field(default_factory=list)
+
+    async def new_context(self, **_kwargs: Any) -> _SessionCtx:
+        ctx = _SessionCtx()
+        self.contexts.append(ctx)
+        return ctx
+
+
+@dataclass
+class _SessionPool:
+    _browser: _SessionBrowser = field(default_factory=_SessionBrowser)
+
+
 @pytest.mark.asyncio
 async def test_fetch_calls_pre_goto_before_target_navigation(make_deps, monkeypatch) -> None:
     deps, page = make_deps()
@@ -154,3 +179,12 @@ async def test_fetch_calls_pre_goto_before_target_navigation(make_deps, monkeypa
     ]
     assert page.goto_calls[0][0] == "https://warmup.example/path"
     assert page.goto_calls[1][0] == "https://example.com/page"
+
+
+@pytest.mark.asyncio
+async def test_session_create_with_warming_off_keeps_evasion_disabled() -> None:
+    manager = SessionManager()
+    info = await manager.create(pool=_SessionPool(), warming="off")
+
+    evasion = await manager.get_evasion(info.id)
+    assert evasion is None

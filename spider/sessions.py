@@ -188,18 +188,19 @@ class SessionManager:
         # so we can pull persona-derived kwargs (UA, locale, TZ,
         # viewport, geo, headers) into the new_context call.
         evasion: EvasionBase | None = None
+        warming_enabled = warming in {"search-click", "hub"}
+
         if (
             persona is not None
             or evasion_rate_per_min is not None
-            or warming is not None
-            or warming_queries is not None
+            or warming_enabled
         ):
             cfg = EvasionConfig(persona=persona, backend=backend_label)
             if evasion_rate_per_min is not None:
                 cfg.rate_per_min = evasion_rate_per_min
-            if warming is not None:
+            if warming_enabled:
                 cfg.warming = warming
-            if warming_queries is not None:
+            if warming_queries is not None and warming_enabled:
                 cfg.warming_queries = warming_queries
             evasion = EvasionBase(cfg)
 

@@ -540,7 +540,7 @@ async def sessions_create(request: web.Request) -> web.Response:
           "metadata": {"user_id": "..."},   // free-form
           "user_agent": "...",              // override default UA
           "viewport": {"width": 1280, "height": 720},
-          "backend": "cloak" | "lightpanda", // default: env-configured
+          "backend": "cloak" | "lightpanda" | "browser-use", // default: env-configured
           "profile": "my-saved-profile"     // hydrate from ProfileStore (503/404)
         }
 
@@ -709,6 +709,8 @@ def _primary_backend_for(deps: FetchDeps) -> str:
     """Return the backend name of the primary pool. Reuses the class-name
     heuristic from dispatch.py without importing it (avoid cycle)."""
     cls_name = type(deps.pool).__name__.lower()
+    if "browseruse" in cls_name or "browser_use" in cls_name:
+        return "browser-use"
     if "lightpanda" in cls_name:
         return "lightpanda"
     return "cloak"

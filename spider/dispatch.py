@@ -23,8 +23,10 @@ Browser-backend choice
 ----------------------
 
 For the generic (browser-rendered) path, callers can pick which
-backend renders: ``browser="cloak"`` (default, stealth Chromium) or
-``browser="lightpanda"`` (beta, Zig CDP browser). The choice flows
+backend renders: ``browser="cloak"`` (default, stealth Chromium),
+``browser="lightpanda"`` (beta, Zig CDP browser), or
+``browser="browser-use"`` (CDP endpoint exposed by browser-use sidecar).
+The choice flows
 through ``spider/browsers/get_or_create_pool`` which lazy-instantiates
 the alternate pool on first use, so the unused backend has zero cost.
 """
@@ -96,7 +98,8 @@ async def dispatch_fetch(
                  honored by the specialized HTTP fetchers; the
                  browser path's proxy is fixed at pool launch.
     browser      Browser backend for the browser-rendered path:
-                 ``"cloak"`` (default) or ``"lightpanda"`` (beta).
+                 ``"cloak"`` (default), ``"lightpanda"`` (beta), or
+                 ``"browser-use"`` (browser-use sidecar CDP Chromium).
                  Unknown values fall back to ``"cloak"``. Lazy: the
                  alternate pool only gets constructed on first use.
     session_id   Browser session id (see ``spider/sessions.py``).
@@ -165,6 +168,8 @@ def _primary_backend(deps: FetchDeps) -> Backend:
     here to keep dispatch.py light; the comparison is by class name.
     """
     cls_name = type(deps.pool).__name__.lower()
+    if "browseruse" in cls_name or "browser_use" in cls_name:
+        return "browser-use"
     if "lightpanda" in cls_name:
         return "lightpanda"
     return "cloak"

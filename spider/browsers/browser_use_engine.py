@@ -50,6 +50,7 @@ import os
 import time
 from typing import Any
 
+from spider.browsers.lightpanda import LightpandaPool
 from spider.log import log
 
 # Env vars consumed here. Documented in .env.example.
@@ -105,7 +106,7 @@ def get_vnc_url() -> str:
     return BROWSER_USE_VNC_URL
 
 
-async def probe_chrome_alive() -> tuple[bool, str]:
+async def probe_chrome_alive(cdp_url: str | None = None) -> tuple[bool, str]:
     """Cheap CDP smoke check.
 
     Hits ``GET /json/version`` on the configured CDP URL. Returns
@@ -114,7 +115,8 @@ async def probe_chrome_alive() -> tuple[bool, str]:
     """
     import httpx
 
-    url = BROWSER_USE_CDP_URL.rstrip("/") + "/json/version"
+    base_url = (cdp_url or BROWSER_USE_CDP_URL).rstrip("/")
+    url = base_url + "/json/version"
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.get(url)
@@ -124,6 +126,32 @@ async def probe_chrome_alive() -> tuple[bool, str]:
             return True, f"cdp ok: browser={data.get('Browser', '?')}"
     except Exception as e:  # noqa: BLE001
         return False, f"cdp probe {type(e).__name__}: {e}"
+
+
+class BrowserUsePool(LightpandaPool):
+    """CDP-backed pool for browser-use sidecar Chromium.
+
+    Reuses the Lightpanda CDP plumbing but adds a mandatory sidecar
+    liveness probe before the first connect so lazy pool creation only
+    succeeds when the browser-use endpoint is actually reachable.
+    """
+
+    def __init__(
+        self,
+        *,
+        cdp_url: str | None = None,
+        require_alive: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(cdp_url=cdp_url or get_chrome_cdp_url(), **kwargs)
+        self._require_alive = require_alive
+
+    async def _open(self) -> None:
+        if self._require_alive:
+            alive, detail = await probe_chrome_alive(self._cdp_url)
+            if not alive:
+                raise RuntimeError(f"browser-use sidecar unavailable: {detail}")
+        await super()._open()
 
 
 # ─── browser_act ────────────────────────────────────────────────────
@@ -363,6 +391,7 @@ __all__ = [
     "BROWSER_USE_DEFAULT_MODEL",
     "BROWSER_USE_HTTP_URL",
     "BROWSER_USE_VNC_URL",
+    "BrowserUsePool",
     "DEFAULT_MAX_STEPS",
     "OPENROUTER_BASE_URL",
     "browser_act",

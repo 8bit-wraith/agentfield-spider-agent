@@ -22,6 +22,7 @@ from spider.browsers import (
     register_primary,
     shutdown_all,
 )
+from spider.browsers.browser_use_engine import BrowserUsePool
 from spider.browsers.lightpanda import (
     LightpandaPool,
     MissingPlaywrightError,
@@ -43,6 +44,9 @@ def _run(coro: Any) -> Any:
         ("  cloak  ", "cloak"),
         ("lightpanda", "lightpanda"),
         ("Lightpanda", "lightpanda"),
+        ("browser-use", "browser-use"),
+        ("browser_use", "browser-use"),
+        (" Browser-Use ", "browser-use"),
         ("puppeteer", "cloak"),  # unknown → default
         ("garbage", "cloak"),
     ],
@@ -67,6 +71,11 @@ def test_env_backend_unknown_falls_back(monkeypatch) -> None:
     assert env_backend() == "cloak"
 
 
+def test_env_backend_browser_use(monkeypatch) -> None:
+    monkeypatch.setenv("BROWSER_BACKEND", "browser-use")
+    assert env_backend() == "browser-use"
+
+
 # ─── make_pool ───────────────────────────────────────────────────────
 def test_make_pool_cloak_returns_cloak_subclass() -> None:
     pool = make_pool("cloak")
@@ -77,6 +86,11 @@ def test_make_pool_cloak_returns_cloak_subclass() -> None:
 def test_make_pool_lightpanda_returns_lightpanda_pool() -> None:
     pool = make_pool("lightpanda")
     assert isinstance(pool, LightpandaPool)
+
+
+def test_make_pool_browser_use_returns_browser_use_pool() -> None:
+    pool = make_pool("browser-use", require_alive=False)
+    assert isinstance(pool, BrowserUsePool)
 
 
 # ─── registry: get_or_create_pool + register_primary ─────────────────
@@ -258,3 +272,52 @@ def test_lightpanda_ensure_browser_opens_then_idempotent() -> None:
     assert b1 is fake_browser
     assert b2 is fake_browser  # same instance, not a new connect
     assert n == 1  # only ONE _open call despite two ensure_browser callers
+
+
+# ─── BrowserUsePool ──────────────────────────────────────────────────
+def test_browser_use_pool_requires_sidecar_probe(monkeypatch) -> None:
+    from spider.browsers import browser_use_engine
+
+    fake_browser = _FakeBrowser()
+
+    async def fake_connect(_cdp_url: str) -> _FakeBrowser:
+        return fake_browser
+
+    async def fake_probe(_cdp_url: str | None = None) -> tuple[bool, str]:
+        return False, "down"
+
+    monkeypatch.setattr(browser_use_engine, "probe_chrome_alive", fake_probe)
+
+    pool = browser_use_engine.BrowserUsePool(connect_factory=fake_connect)
+
+    async def _go():
+        async with pool.lease():
+            pass
+
+    with pytest.raises(RuntimeError, match="sidecar unavailable"):
+        _run(_go())
+
+
+def test_browser_use_pool_lease_when_sidecar_healthy(monkeypatch) -> None:
+    from spider.browsers import browser_use_engine
+
+    fake_browser = _FakeBrowser()
+
+    async def fake_connect(_cdp_url: str) -> _FakeBrowser:
+        return fake_browser
+
+    async def fake_probe(_cdp_url: str | None = None) -> tuple[bool, str]:
+        return True, "ok"
+
+    monkeypatch.setattr(browser_use_engine, "probe_chrome_alive", fake_probe)
+
+    pool = browser_use_engine.BrowserUsePool(connect_factory=fake_connect)
+
+    async def _go():
+        async with pool.lease() as page:
+            assert isinstance(page, _FakePage)
+            assert page.closed is False
+        return page
+
+    page = _run(_go())
+    assert page.closed is True

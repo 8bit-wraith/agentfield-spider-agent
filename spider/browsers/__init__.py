@@ -31,10 +31,10 @@ from typing import Any, Literal
 from .base import BrowserPool
 
 # PEP 695 type alias — Python 3.12+
-type Backend = Literal["cloak", "lightpanda"]
+type Backend = Literal["cloak", "lightpanda", "browser-use"]
 
 DEFAULT_BACKEND: Backend = "cloak"
-_VALID_BACKENDS: frozenset[str] = frozenset({"cloak", "lightpanda"})
+_VALID_BACKENDS: frozenset[str] = frozenset({"cloak", "lightpanda", "browser-use"})
 
 
 def normalize_backend(raw: str | None) -> Backend:
@@ -46,7 +46,7 @@ def normalize_backend(raw: str | None) -> Backend:
     """
     if raw is None:
         return DEFAULT_BACKEND
-    cleaned = raw.strip().lower()
+    cleaned = raw.strip().lower().replace("_", "-")
     if cleaned not in _VALID_BACKENDS:
         return DEFAULT_BACKEND
     return cleaned  # type: ignore[return-value]
@@ -68,6 +68,10 @@ def make_pool(backend: Backend, **kwargs: Any) -> BrowserPool:
         from .lightpanda import LightpandaPool
 
         return LightpandaPool(**kwargs)
+    if backend == "browser-use":
+        from .browser_use_engine import BrowserUsePool
+
+        return BrowserUsePool(**kwargs)
     # Default + fallback: cloak
     from .cloak import CloakPool
 

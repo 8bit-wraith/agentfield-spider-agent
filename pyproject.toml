@@ -139,6 +139,10 @@ reportUnknownMemberType = "none"       # ditto
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "core: fetch pipeline, security, dispatch, sessions, HTTP contract (CI core phase)",
+    "extended: optional sinks, docling, profiles, feeds (CI extended phase)",
+]
 filterwarnings = [
     "ignore::DeprecationWarning:aiohttp.*",
 ]

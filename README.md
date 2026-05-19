@@ -191,7 +191,10 @@ optionally install Docling when `SPIDER_INSTALL_DOCLING=1` (legacy
 By default the same setup path also installs Docker CLI + buildx
 (`SPIDER_INSTALL_DOCKER=1`) and performs `docker login` when both
 `DOCKER_USER` and `DOCKER_PAT` are present (registry defaults to
-`DOCKER_REGISTRY=docker.io`).
+`DOCKER_REGISTRY=docker.io`). In non-root environments without
+passwordless sudo, Docker bootstrap logs a warning and continues with
+Python dependency install. Set `SPIDER_INSTALL_DOCKER_STRICT=1` to make
+that case fail fast.
 
 For local containerized development, `.devcontainer/devcontainer.json`
 uses `.devcontainer/postCreate.sh`, which delegates to the same shared

@@ -16,6 +16,64 @@ _docker_arch() {
     esac
 }
 
+_docker_warn_or_fail() {
+    local message="$1"
+
+    if [[ "${SPIDER_INSTALL_DOCKER_STRICT:-0}" == "1" ]]; then
+        echo "[env] ERROR: ${message}" >&2
+        return 1
+    fi
+
+    echo "[env] WARN: ${message}; continuing without docker bootstrap" >&2
+    return 0
+}
+
+_detect_privilege_mode() {
+    local forced_mode
+    forced_mode="${SPIDER_SETUP_PRIVILEGE_MODE:-auto}"
+    case "$forced_mode" in
+        root|sudo|none)
+            echo "$forced_mode"
+            return
+            ;;
+        auto|"")
+            ;;
+        *)
+            echo "[env] WARN: ignoring invalid SPIDER_SETUP_PRIVILEGE_MODE=${forced_mode}" >&2
+            ;;
+    esac
+
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+        echo "root"
+        return
+    fi
+
+    if command -v sudo > /dev/null 2>&1 && sudo -n true > /dev/null 2>&1; then
+        echo "sudo"
+        return
+    fi
+
+    echo "none"
+}
+
+_apt_get() {
+    local privilege_mode="$1"
+    shift
+
+    case "$privilege_mode" in
+        root)
+            apt-get "$@"
+            ;;
+        sudo)
+            sudo -n apt-get "$@"
+            ;;
+        *)
+            echo "[env] ERROR: apt-get requested without elevation capability" >&2
+            return 1
+            ;;
+    esac
+}
+
 _ensure_docker_cli() {
     if command -v docker > /dev/null 2>&1; then
         echo "[env] docker cli already present: $(docker --version 2>/dev/null || echo docker)"
@@ -29,15 +87,34 @@ _ensure_docker_cli() {
         return 1
     fi
 
-    echo "[env] installing docker cli via apt (sudo)"
-    sudo apt-get update
-    if ! sudo apt-get install -y --no-install-recommends docker.io docker-buildx docker-compose-v2; then
+    local privilege_mode
+    privilege_mode="$(_detect_privilege_mode)"
+    case "$privilege_mode" in
+        root)
+            echo "[env] installing docker cli via apt (root)"
+            ;;
+        sudo)
+            echo "[env] installing docker cli via apt (sudo -n)"
+            ;;
+        none)
+            _docker_warn_or_fail "docker install requested but no root access or passwordless sudo is available"
+            return
+            ;;
+    esac
+
+    _apt_get "$privilege_mode" update
+    if ! _apt_get "$privilege_mode" install -y --no-install-recommends docker.io docker-buildx docker-compose-v2; then
         echo "[env] docker-buildx/docker-compose-v2 unavailable; installing docker.io only"
-        sudo apt-get install -y --no-install-recommends docker.io
+        _apt_get "$privilege_mode" install -y --no-install-recommends docker.io
     fi
 }
 
 _ensure_buildx_plugin() {
+    if ! command -v docker > /dev/null 2>&1; then
+        _docker_warn_or_fail "docker cli not found; skipping buildx plugin install"
+        return
+    fi
+
     if docker buildx version > /dev/null 2>&1; then
         echo "[env] docker buildx already available"
         return
@@ -66,6 +143,11 @@ _docker_login_if_configured() {
     user="${DOCKER_USER:-}"
     registry="${DOCKER_REGISTRY:-docker.io}"
 
+    if ! command -v docker > /dev/null 2>&1; then
+        _docker_warn_or_fail "docker cli not found; skipping docker login"
+        return
+    fi
+
     if [[ -z "${DOCKER_PAT:-}" || -z "$user" ]]; then
         echo "[env] docker login skipped (set DOCKER_USER + DOCKER_PAT to enable)"
         return
@@ -78,8 +160,10 @@ _docker_login_if_configured() {
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 PIP_CMD=("$PYTHON_BIN" -m pip)
 SPIDER_INSTALL_DOCKER="${SPIDER_INSTALL_DOCKER:-1}"
+SPIDER_INSTALL_DOCKER_STRICT="${SPIDER_INSTALL_DOCKER_STRICT:-0}"
 
 if [[ "$SPIDER_INSTALL_DOCKER" == "1" ]]; then
+    echo "[env] docker bootstrap enabled (strict=${SPIDER_INSTALL_DOCKER_STRICT})"
     _ensure_docker_cli
     _ensure_buildx_plugin
     _docker_login_if_configured

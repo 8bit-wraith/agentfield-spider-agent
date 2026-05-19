@@ -122,11 +122,16 @@ jobs:
           username: ${{ env.DOCKER_USER }}
           password: ${{ secrets.DOCKER_PAT }}
 
-      - name: Set up Docker Buildx
+      - name: Set up Docker Buildx (cloud)
+        if: github.event_name != 'pull_request'
         uses: docker/setup-buildx-action@v3
         with:
           driver: cloud
           endpoint: "60ph3r/main-gh-builder-joe"
+
+      - name: Set up Docker Buildx (local PR fallback)
+        if: github.event_name == 'pull_request'
+        uses: docker/setup-buildx-action@v3
 
       # Trim DOCKER_USER: a trailing newline in the environment secret turns the
       # multiline ``tags`` input into four lines (user + /image:tag), which makes

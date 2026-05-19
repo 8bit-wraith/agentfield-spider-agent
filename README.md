@@ -31,6 +31,7 @@ hn / reddit / docling) before falling through to the browser pool.
 | AgentField | `spider-agent.sitemap_parse(url, max_urls=1000, queue=False)` | `{url, urls: [...], count, queued}` |
 | AgentField | `spider-agent.screenshot(url, full_page=True)` | `{ok, png_b64, ms}` |
 | AgentField | `spider-agent.extract(url, selector, attr=None)` | `{ok, matches: [...], ms}` |
+| AgentField | `spider-agent.act(task, session_id, model=None, max_steps=None, allowed_hosts=None)` | `{status, task, session_id, model, ms, result?, urls_visited?, steps_taken?, is_done?}` — browser-use Agent against an existing session's `BrowserContext` |
 | HTTP | `POST /fetch/sync {url, use_browser?, proxy?}` | same dict as `fetch(sync=True)`, enriched per URL kind |
 | HTTP | `POST /fetch {url}` | `{queued: true, url}` (Redis-backed worker) |
 | HTTP | `POST /feeds {url, interval_s?, name?}` | `{id, url, ...}` |
@@ -41,6 +42,7 @@ hn / reddit / docling) before falling through to the browser pool.
 | HTTP | `POST /sitemap/parse {url, queue?, max_urls?}` | `{url, urls: [...], count, queued}` |
 | HTTP | `POST /screenshot {url, full_page?}` | `{ok, png_b64, ms}` |
 | HTTP | `POST /extract {url, selector, attr?}` | `{ok, matches: [...], ms}` |
+| HTTP | `POST /act {task, session_id, model?, max_steps?, allowed_hosts?}` | same dict as `act(...)`; returns `501` without the `[browser-use]` extra |
 | HTTP | `GET /jobs?limit=50` | recent fetch outcomes |
 | HTTP | `GET /health` | snapshot |
 

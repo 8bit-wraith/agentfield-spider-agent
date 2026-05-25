@@ -32,6 +32,7 @@ from . import feeds as feeds_mod
 from .crawl import crawl_start, crawl_status
 from .fetch import FetchDeps
 from .log import log
+from .proxy import env_proxy
 from .queue import run_and_record
 from .security import is_safe_external_url
 from .sitemap import sitemap_parse
@@ -98,15 +99,48 @@ async def health(request: web.Request) -> web.Response:
         except Exception as e:  # pragma: no cover
             counts = {"error": f"{type(e).__name__}: {e}"}
 
+    # Cheap proxy summary — just whether one is configured and its scheme.
+    # The liveness probe hits /health often, so we do NOT egress here; the
+    # live reachability + egress-IP check lives at GET /proxy/health.
+    pxy = env_proxy()
+    proxy_block: dict[str, Any] = {"configured": pxy is not None}
+    if pxy:
+        proxy_block["scheme"] = pxy.split("://", 1)[0] if "://" in pxy else "?"
+
     return _json(
         {
             "ok": True,
             "service": "spider-http",
             "browser": browser_state,
             "fetch_timeout_ms": int(os.environ.get("FETCH_TIMEOUT_MS", "30000")),
+            "proxy": proxy_block,
             **counts,
         }
     )
+
+
+# ─── /proxy/health ──────────────────────────────────────────────────
+async def proxy_health(request: web.Request) -> web.Response:
+    """``GET /proxy/health`` — live egress check through ``SPIDER_PROXY_URL``.
+
+    Makes one GET through the configured proxy (typically the S8 4G
+    gateway) to an IP-echo endpoint and reports the egress IP + geo.
+
+    Status codes:
+      200 — proxy reachable, OR no proxy configured (``configured: false``)
+      502 — proxy configured but unreachable / errored
+    """
+    http = request.app.get("http")
+    if http is None:
+        return _json({"error": "http session not configured"}, status=503)
+    from .proxy_health import check_proxy
+
+    health = await check_proxy(http)
+    body = health.as_dict()
+    if not health.configured:
+        body["note"] = "no SPIDER_PROXY_URL configured"
+        return _json(body, status=200)
+    return _json(body, status=200 if health.reachable else 502)
 
 
 # ─── /fetch + /fetch/sync ───────────────────────────────────────────
@@ -1089,6 +1123,7 @@ async def act_handler(request: web.Request) -> web.Response:
 def register_routes(app: web.Application) -> None:
     """Wire all v1 routes into ``app``. Idempotent across distinct apps."""
     app.router.add_get("/health", health)
+    app.router.add_get("/proxy/health", proxy_health)
     app.router.add_post("/fetch", fetch_async)
     app.router.add_post("/fetch/sync", fetch_sync)
     app.router.add_post("/feeds", feeds_add)
@@ -1134,6 +1169,7 @@ __all__ = [
     "fetch_sync",
     "health",
     "jobs",
+    "proxy_health",
     "register_routes",
     "screenshot",
     "sitemap_handler",

@@ -183,9 +183,96 @@ SPIDER_PROXY_URL=http://<pi-lan-ip>:8888
 
 ---
 
+## Path D — Galaxy-S8 mitmproxy over a Tailscale mesh IP (recommended for 4G)
+
+This is the setup behind our "S8 4G mobile proxy". It is structurally
+different from A–C: there is **no SSH tunnel and no host-wide exit
+node**. The phone runs `mitmproxy` (inside proot-Debian inside Termux)
+and is reachable *directly* on its Tailscale mesh IP. The spider just
+points `SPIDER_PROXY_URL` at `http://<tailnet-ip>:<port>` and it works
+from anywhere on the tailnet.
+
+|  | A (sshd) | B (exit node) | C (Pi) | **D (this one)** |
+|---|---|---|---|---|
+| Phone runs | Termux + sshd | Tailscale exit node | WiFi hotspot | Termux + proot Debian + mitmproxy |
+| Reach via | SSH `-D` SOCKS5 | host-wide exit-node | Pi LAN IP | **Tailscale mesh IP, direct** |
+| `SPIDER_PROXY_URL` | `socks5://127.0.0.1:1080` | (host-wide) | `http://<pi-lan-ip>:8888` | **`http://<tailnet-ip>:<port>`** (e.g. `http://100.122.115.94:12345`) |
+| UA spoofing | spider-side | spider-side | spider-side | **proxy-side** (mitmproxy addon rotates mobile UAs per request) |
+| HTTPS interception | no | no | no | **yes** (mitmproxy CA must be trusted on the spider host) |
+
+The mesh-IP-direct approach means no tunnel layer to babysit and no
+exit-node config that changes the spider host's whole routing.
+
+### On the spider host
+
+```
+SPIDER_PROXY_URL=http://<tailnet-ip>:<port>
+```
+
+That's it for the happy path. Confirm with the built-in egress check
+(see [Verification](#verification) below):
+
+```bash
+curl -fsS http://localhost:11700/proxy/health | jq .
+# {"configured": true, "reachable": true, "egress_ip": "...", "country_code": "DE", ...}
+```
+
+### Caveats (operator responsibilities — NOT automated)
+
+These steps are deliberately left out of the spider's code. They are
+device- and trust-store changes the operator performs manually after
+reviewing them:
+
+1. **UA spoofing happens server-side.** The mitmproxy addon rewrites
+   `User-Agent` per request from a mobile-UA rotation list, so the
+   spider's own UA setting is overridden. Anything that needs to
+   identify itself to a peer (e.g. AgentField internal heartbeats)
+   should bypass the proxy.
+2. **HTTPS interception requires CA trust.** mitmproxy performs MITM.
+   The spider host must trust `mitmproxy-ca-cert.pem` (pulled from the
+   device) or CloakBrowser throws cert errors. ⚠️ Installing a MITM CA
+   lets that proxy decrypt **all** HTTPS from the host — only do this
+   on a host dedicated to scraping, and never point the proxy at
+   traffic you wouldn't want intercepted.
+3. **The proxy lives on Android's sandbox edge.** If Termux is killed
+   by the low-memory killer, the proxy goes down silently. Use
+   `GET /proxy/health` (or `scripts/check-proxy.sh`) as a watchdog /
+   readiness gate before scaling crawl load onto it.
+
+### Reference
+
+Full device-side runbook (mitmproxy addon, Termux/proot bootstrap, CA
+export) is maintained by the operator outside this repo. This repo only
+ships the *spider-side* wiring (`SPIDER_PROXY_URL`) and the
+`/proxy/health` egress check.
+
+---
+
 ## Verification
 
-The spider logs `proxy=true` on `browser.opened` when it launches
+The fastest check is the built-in egress probe — it makes one request
+through the configured proxy and reports the carrier IP + geo:
+
+```bash
+curl -fsS http://localhost:11700/proxy/health | jq .
+# {
+#   "configured": true,
+#   "reachable": true,
+#   "proxy_url": "http://100.122.115.94:12345",   # credentials redacted
+#   "egress_ip": "84.17.52.9",
+#   "country": "Germany", "country_code": "DE",
+#   "timezone": "Europe/Berlin", "isp": "Vodafone GmbH",
+#   "ms": 412
+# }
+```
+
+`reachable: false` (HTTP 502) means the proxy is set but the spider
+couldn't egress through it — check the `error` field. `configured:
+false` means `SPIDER_PROXY_URL` is unset. From the AgentField surface
+the same check is the `spider-agent.proxy_health` skill;
+`scripts/check-proxy.sh` wraps it for the smoke ladder.
+
+The spider also logs `proxy=true` on `browser.opened` when it launches
 CloakBrowser through a proxy. For HTTP fetchers there's no per-call
 log, but you can confirm with:
 

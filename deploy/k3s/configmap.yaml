@@ -31,10 +31,23 @@ data:
   CRAWL_ROBOTS_TTL_S: "3600"
   CRAWL_ROBOTS_UA: "agentfield-spider/0.1"
   CRAWL_ROBOTS_DISABLE: "0"
-  CRAWL_CONCURRENCY: "3"
+  # Dispatcher fan-out: max concurrent fetch jobs drained from
+  # crawler:queue. This is the primary throughput lever — the pod is
+  # single-replica by design (see deployment.yaml), so scale here +
+  # resource limits, not via replicas. CRAWL_HOST_RPS still throttles
+  # per-target politeness independently.
+  #
+  # NOTE: when egressing through a single mobile proxy (SPIDER_PROXY_URL,
+  # e.g. the S8 4G gateway) ALL of this concurrency funnels through one
+  # phone. Keep it modest (~3-4) behind a single proxy; the higher value
+  # below assumes direct egress. Verify the proxy first: GET /proxy/health.
+  CRAWL_CONCURRENCY: "6"
 
   # --- Browser pool ---
-  BROWSER_MAX_PAGES: "3"
+  # Kept aligned with CRAWL_CONCURRENCY so concurrent jobs each get a
+  # browser tab without oversubscribing. More tabs = more Chromium RAM —
+  # the http container's memory limit is sized for this (deployment.yaml).
+  BROWSER_MAX_PAGES: "6"
   BROWSER_IDLE_S: "60"
   FETCH_TIMEOUT_MS: "30000"
   FETCH_HEADLESS: "1"

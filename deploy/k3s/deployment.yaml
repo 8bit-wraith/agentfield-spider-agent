@@ -64,9 +64,12 @@ spec:
             cpu: "500m"
             memory: "1Gi"
           limits:
-            # Chromium needs headroom — 2 GiB is the v1 default.
-            cpu: "2"
-            memory: "2Gi"
+            # Chromium needs headroom, and we run more concurrent tabs
+            # now (CRAWL_CONCURRENCY/BROWSER_MAX_PAGES=6 in the
+            # configmap). ~500 MB/tab worst case → 3 GiB ceiling. Raise
+            # both together if you scale concurrency higher.
+            cpu: "3"
+            memory: "3Gi"
         livenessProbe:
           httpGet:
             path: /health

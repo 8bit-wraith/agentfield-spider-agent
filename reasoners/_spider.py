@@ -335,6 +335,29 @@ async def _extract(
         }
 
 
+async def _proxy_health() -> dict[str, Any]:
+    """Check the outbound proxy (S8 4G gateway) via ``GET /proxy/health``.
+
+    Returns the egress IP + geo when the proxy is reachable, or a
+    ``configured: false`` envelope when no ``SPIDER_PROXY_URL`` is set.
+    """
+    try:
+        async with _client_factory() as client:
+            r = await client.get(f"{SPIDER_HTTP_URL}/proxy/health")
+            try:
+                return _response_json(r)
+            except ValueError:
+                return {
+                    "status": "error",
+                    "error": f"non-json response: HTTP {r.status_code}",
+                }
+    except httpx.RequestError as e:
+        return {
+            "status": "error",
+            "error": f"{type(e).__name__}: {e}",
+        }
+
+
 async def _act(
     task: str,
     session_id: str,
@@ -392,6 +415,7 @@ __all__ = [
     "_feed_remove",
     "_fetch",
     "_jobs_recent",
+    "_proxy_health",
     "_screenshot",
     "_sitemap_parse",
     "SPIDER_HTTP_URL",

@@ -40,6 +40,7 @@ from reasoners._spider import (
     _feed_remove,
     _fetch,
     _jobs_recent,
+    _proxy_health,
     _screenshot,
     _sitemap_parse,
 )
@@ -114,6 +115,18 @@ async def feed_poll(feed_id: str) -> dict[str, Any]:
 async def jobs_recent(limit: int = 50) -> dict[str, Any]:
     """List recent fetch jobs."""
     return await _jobs_recent(limit)
+
+
+@app.skill()
+async def proxy_health() -> dict[str, Any]:
+    """Check the outbound proxy (S8 4G gateway) egress IP + geo.
+
+    Verifies SPIDER_PROXY_URL is reachable and reports the carrier
+    egress IP / country / timezone, so you can confirm the spider is
+    leaving through the mobile proxy before scaling crawl load onto it.
+    Returns ``{configured: false}`` when no proxy is set.
+    """
+    return await _proxy_health()
 
 
 @app.skill()

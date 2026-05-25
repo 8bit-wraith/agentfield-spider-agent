@@ -19,6 +19,7 @@
 #   SKIP_MULTI=1 ./check-all.sh    # sitemap runs only the reference target
 #   SKIP_REUSE=1 ./check-all.sh    # skip HTTP/TLS connection-reuse probe
 #   SKIP_ACT=1 ./check-all.sh      # skip /act (requires [browser-use] extra for full pass)
+#   SKIP_PROXY=1 ./check-all.sh    # skip /proxy/health (auto-passes if no SPIDER_PROXY_URL)
 
 set -euo pipefail
 
@@ -69,6 +70,14 @@ if [[ "${SKIP_ACT:-0}" == "1" ]]; then
     echo "SKIP: SKIP_ACT=1"
 else
     "$SCRIPT_DIR/check-act.sh"
+fi
+echo
+
+if [[ "${SKIP_PROXY:-0}" == "1" ]]; then
+    echo "═══ I. /proxy/health ═══"
+    echo "SKIP: SKIP_PROXY=1"
+else
+    "$SCRIPT_DIR/check-proxy.sh"
 fi
 
 echo

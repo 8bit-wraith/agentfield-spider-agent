@@ -134,6 +134,7 @@ strict = [
     "spider/docling_parser.py",
     "spider/dispatch.py",
     "spider/proxy.py",
+    "spider/proxy_health.py",
     "spider/fetchers/**",
     "spider/errors.py",
     "spider/fetch.py",
